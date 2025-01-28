@@ -4,6 +4,7 @@ version = "0.1.0"
 description = ""
 readme = "README.md"
 requires-python = "==3.9.*"
+# package-dir = {"" = "."}
 
 dependencies = [
     "torch==2.0.0",
@@ -16,7 +17,7 @@ dependencies = [
     "xformers==0.0.18",
     "huggingface-hub==0.20.2",
     "h5py",
-    "numpy",
+    "numpy<2",
     "pandas",
     "pillow",
     "einops",
@@ -38,6 +39,7 @@ dependencies = [
     "scikit-image",
     "psutil",
     "pydantic==2.10.6",
+    "taskipy>=1.14.1",
 ]
 
 [build-system]
@@ -51,3 +53,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["dlbcl_subtyping"]
+
+[tool.taskipy.tasks]
+main = "python -m dlbcl_subtyping.main"
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu117"
+# default = true
+explicit = true
