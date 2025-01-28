@@ -1,0 +1,3 @@
+[submodule "prov-gigapath"]
+	path = prov-gigapath
+	url = https://github.com/prov-gigapath/prov-gigapath
