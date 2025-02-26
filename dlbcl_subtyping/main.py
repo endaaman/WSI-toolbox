@@ -88,6 +88,13 @@ class CLI(BaseMLCLI):
         tq = tqdm(range(row_count))
 
         with h5py.File(a.output_path, 'w') as f:
+            f.create_dataset('metadata/mpp', data=mpp)
+            f.create_dataset('metadata/patch_size', data=S)
+            f.create_dataset('metadata/cols', data=x_patch_count)
+            f.create_dataset('metadata/rows', data=y_patch_count)
+            f.create_dataset('metadata/original_width', data=W)
+            f.create_dataset('metadata/original_height', data=H)
+
             total_patches = f.create_dataset('patches',
                                              shape=(x_patch_count*y_patch_count, S, S, 3),
                                              dtype=np.uint8,
@@ -113,11 +120,36 @@ class CLI(BaseMLCLI):
                 total_patches[cursor:cursor+len(batch), ...] = batch
                 cursor += len(batch)
 
+            patch_count = len(coordinates)
             f.create_dataset('coordinates', data=coordinates)
-            f['patches'].resize((len(coordinates), S, S, 3))
+            f['patches'].resize((patch_count, S, S, 3))
+            f.create_dataset('metadata/patch_count', data=patch_count)
 
         print(f'{len(coordinates)} patches were selected.')
         print('done')
+
+    class JoinArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field(..., l='--out', s='-o')
+
+    def run_join(self, a):
+        S = 32
+        with h5py.File(a.input_path, 'r') as f:
+            cols = f['metadata/cols'][()]
+            rows = f['metadata/rows'][()]
+            patch_count = f['metadata/patch_count'][()]
+            patch_size = f['metadata/patch_size'][()]
+
+            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
+            for i in tqdm(range(patch_count)):
+                coord = f['coordinates'][i]
+                x, y = coord//patch_size*S
+                patch = f['patches'][i]
+                patch = Image.fromarray(patch)
+                patch = patch.resize((S, S))
+                canvas.paste(patch, (x, y, x+S, y+S))
+
+            canvas.save(a.output_path)
 
 
 if __name__ == '__main__':
