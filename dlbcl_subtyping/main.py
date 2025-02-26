@@ -68,20 +68,15 @@ class CLI(BaseMLCLI):
         # print(patches.shape)
         # indices = np.indices((X, Y)).reshape(2, -1).T
 
-        x_patch_count = W//S
-        y_patch_count = H//S
-        x_tile_count = W//a.tile_size
-        y_tile_count = H//a.tile_size
-
-        tile_widths = np.array([(x_patch_count + i) // x_tile_count for i in range(x_tile_count)])*S
-        tile_heights = np.array([(y_patch_count + i) // y_tile_count for i in range(y_tile_count)])*S
+        x_patch_count = W//512
+        y_patch_count = H//512
+        width = (W//512)*512
+        row_count = H // 512
 
         print('Original size', W, H)
-        print('read size', x_patch_count*512, y_patch_count*512)
-        print('tile count', x_tile_count, y_tile_count)
-        print('patch count', x_patch_count, y_patch_count)
 
-        output_path = 'out/a.h5'
+        total_patches = []
+        output_path = 'out/b.h5'
         with h5py.File(output_path, 'w') as f:
             images = f.create_dataset('patches',
                                      shape=(x_patch_count*y_patch_count, S, S, 3),
@@ -90,41 +85,66 @@ class CLI(BaseMLCLI):
                                      compression='gzip')
             patch_index = 0
             coordinates = []
-            tile_x = 0
-            tile_y = 0
             cursor = 0
-            for h in tile_heights:
-                tile_x = 0
-                for w in tile_widths:
-                    print((tile_x, tile_y), w, h, )
-                    tile = wsi.read_region((tile_x, tile_y), target_level, (w, h)).convert('RGB')
-                    print(f'{tile_y} {tile_x}', w, h)
-                    # tile.save(f'out/{tile_y}_{tile_x}.jpg')
-                    os.makedirs(f'out/{tile_y}_{tile_x}', exist_ok=True)
+            tq = tqdm(range(row_count))
+            for row in tq:
+                image = wsi.read_region((0, row*S), target_level, (width, S)).convert('RGB')
+                image = np.array(image)
 
-                    tile = np.array(tile)
-                    cols = w//S
-                    rows = h//S
-                    patches = tile.reshape(rows, S, cols, S, 3) # (y, h, x, w, 3)
-                    patches = patches.transpose(0, 2, 1, 3, 4)   # (y, x, h, w, 3)
-                    indices = np.indices((cols, rows)).reshape(2, -1).T
-                    batch = []
-                    for (x, y) in tqdm(indices):
-                        patch = patches[y, x, ...]
-                        # Image.fromarray(patch).save(f'out/{tile_y}_{tile_x}/{y}_{x}.jpg')
-                        if is_white_patch(patch):
-                            continue
-                        coordinates.append((x, y))
-                        batch.append(patch)
-                        patch_index += 1
-                    batch = np.array(batch)
-                    print('batch', batch.shape)
-                    images[cursor:len(batch), ...] = batch
-                    cursor += len(batch)
+                patches = image.reshape(1, S, x_patch_count, S, 3) # (y, h, x, w, 3)
+                patches = patches.transpose(0, 2, 1, 3, 4)   # (y, x, h, w, 3)
+                patches = patches[0]
 
-                    tile_x += w
+                batch = []
+                for col, patch in enumerate(patches):
+                    if is_white_patch(patch):
+                        continue
+                    # Image.fromarray(patch).save(f'out/{row}_{col}.jpg')
+                    total_patches.append(patch)
+                    coordinates.append((col*S, row*S))
 
-                tile_y += h
+                    batch.append(patch)
+                    patch_index += 1
+                # batch = np.array(batch)
+                # tq.set_description(f'{batch.shape}')
+                # images[cursor:len(batch)] = batch
+
+
+            # tile_x = 0
+            # tile_y = 0
+            # cursor = 0
+            # for h in tile_heights:
+            #     tile_x = 0
+            #     for w in tile_widths:
+            #         print((tile_x, tile_y), w, h, )
+            #         tile = wsi.read_region((tile_x, tile_y), target_level, (w, h)).convert('RGB')
+            #         print(f'{tile_y} {tile_x}', w, h)
+            #         # tile.save(f'out/{tile_y}_{tile_x}.jpg')
+            #         os.makedirs(f'out/{tile_y}_{tile_x}', exist_ok=True)
+
+            #         tile = np.array(tile)
+            #         cols = w//S
+            #         rows = h//S
+            #         patches = tile.reshape(rows, S, cols, S, 3) # (y, h, x, w, 3)
+            #         patches = patches.transpose(0, 2, 1, 3, 4)   # (y, x, h, w, 3)
+            #         indices = np.indices((cols, rows)).reshape(2, -1).T
+            #         batch = []
+            #         for (x, y) in tqdm(indices):
+            #             patch = patches[y, x, ...]
+            #             # Image.fromarray(patch).save(f'out/{tile_y}_{tile_x}/{y}_{x}.jpg')
+            #             if is_white_patch(patch):
+            #                 continue
+            #             coordinates.append((x, y))
+            #             batch.append(patch)
+            #             patch_index += 1
+            #         batch = np.array(batch)
+            #         print('batch', batch.shape)
+            #         images[cursor:len(batch), ...] = batch
+            #         cursor += len(batch)
+
+            #         tile_x += w
+
+            #     tile_y += h
 
             # for x, y in tqdm(indices):
             #     img = wsi.read_region((x*S, y*S), target_level, (512, 512))
