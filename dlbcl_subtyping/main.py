@@ -1,5 +1,6 @@
 import os
 from tqdm import tqdm
+from pydantic import Field
 from PIL import Image
 import numpy as np
 import pandas as pd
@@ -34,6 +35,7 @@ class CLI(BaseMLCLI):
         path: str = 'data/19-0548_2.ndpi'
         patch_size: int = 512
         tile_size: int = 8192
+        output_path: str = Field(..., l='--out', s='-o')
 
     def run_wsi(self, a):
         # m = slide_encoder.create_model()
@@ -52,6 +54,7 @@ class CLI(BaseMLCLI):
         else:
             raise RuntimeError(f'Invalid scale: mpp={mpp:.6f}')
 
+        mpp = mpp * scale
         dimension = wsi.level_dimensions[target_level]
         W, H = dimension[0], dimension[1]
         # X = dimension[0] // S
@@ -73,20 +76,24 @@ class CLI(BaseMLCLI):
         width = (W//512)*512
         row_count = H // 512
 
-        print('Original size', W, H)
+        print('target level', target_level)
+        print(f'level mpp: {mpp:.6f}')
+        print('Original resolutions', W, H)
+        print('Obtained resolutions', x_patch_count*S, y_patch_count*S)
+        print('row count:', y_patch_count)
+        print('col count:', x_patch_count)
 
+        coordinates = []
         total_patches = []
-        output_path = 'out/b.h5'
-        with h5py.File(output_path, 'w') as f:
-            images = f.create_dataset('patches',
-                                     shape=(x_patch_count*y_patch_count, S, S, 3),
-                                     dtype='uint8',
-                                     chunks=True,
-                                     compression='gzip')
-            patch_index = 0
-            coordinates = []
+        tq = tqdm(range(row_count))
+
+        with h5py.File(a.output_path, 'w') as f:
+            total_patches = f.create_dataset('patches',
+                                             shape=(x_patch_count*y_patch_count, S, S, 3),
+                                             dtype=np.uint8,
+                                             chunks=(1, S, S, 3),
+                                             compression='gzip')
             cursor = 0
-            tq = tqdm(range(row_count))
             for row in tq:
                 image = wsi.read_region((0, row*S), target_level, (width, S)).convert('RGB')
                 image = np.array(image)
@@ -100,63 +107,16 @@ class CLI(BaseMLCLI):
                     if is_white_patch(patch):
                         continue
                     # Image.fromarray(patch).save(f'out/{row}_{col}.jpg')
-                    total_patches.append(patch)
-                    coordinates.append((col*S, row*S))
-
                     batch.append(patch)
-                    patch_index += 1
-                # batch = np.array(batch)
-                # tq.set_description(f'{batch.shape}')
-                # images[cursor:len(batch)] = batch
-
-
-            # tile_x = 0
-            # tile_y = 0
-            # cursor = 0
-            # for h in tile_heights:
-            #     tile_x = 0
-            #     for w in tile_widths:
-            #         print((tile_x, tile_y), w, h, )
-            #         tile = wsi.read_region((tile_x, tile_y), target_level, (w, h)).convert('RGB')
-            #         print(f'{tile_y} {tile_x}', w, h)
-            #         # tile.save(f'out/{tile_y}_{tile_x}.jpg')
-            #         os.makedirs(f'out/{tile_y}_{tile_x}', exist_ok=True)
-
-            #         tile = np.array(tile)
-            #         cols = w//S
-            #         rows = h//S
-            #         patches = tile.reshape(rows, S, cols, S, 3) # (y, h, x, w, 3)
-            #         patches = patches.transpose(0, 2, 1, 3, 4)   # (y, x, h, w, 3)
-            #         indices = np.indices((cols, rows)).reshape(2, -1).T
-            #         batch = []
-            #         for (x, y) in tqdm(indices):
-            #             patch = patches[y, x, ...]
-            #             # Image.fromarray(patch).save(f'out/{tile_y}_{tile_x}/{y}_{x}.jpg')
-            #             if is_white_patch(patch):
-            #                 continue
-            #             coordinates.append((x, y))
-            #             batch.append(patch)
-            #             patch_index += 1
-            #         batch = np.array(batch)
-            #         print('batch', batch.shape)
-            #         images[cursor:len(batch), ...] = batch
-            #         cursor += len(batch)
-
-            #         tile_x += w
-
-            #     tile_y += h
-
-            # for x, y in tqdm(indices):
-            #     img = wsi.read_region((x*S, y*S), target_level, (512, 512))
-            #     patch = np.array(img.convert('RGB'))
-            #     if is_white_patch(patch):
-            #         continue
-            #     images[i] = patch
-            #     i += 1
-            #     coordinates.append((x*S, y*S))
+                    coordinates.append((col*S, row*S))
+                batch = np.array(batch)
+                total_patches[cursor:cursor+len(batch), ...] = batch
+                cursor += len(batch)
 
             f.create_dataset('coordinates', data=coordinates)
+            f['patches'].resize((len(coordinates), S, S, 3))
 
+        print(f'{len(coordinates)} patches were selected.')
         print('done')
 
 
