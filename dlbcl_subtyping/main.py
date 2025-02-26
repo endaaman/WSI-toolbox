@@ -8,6 +8,8 @@ import pandas as pd
 from matplotlib import pyplot as plt, colors as mcolors
 import seahorse as sns
 import h5py
+import umap
+from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
 from openslide import OpenSlide
 import torch
@@ -97,7 +99,9 @@ class CLI(BaseMLCLI):
                                              shape=(x_patch_count*y_patch_count, S, S, 3),
                                              dtype=np.uint8,
                                              chunks=(1, S, S, 3),
-                                             compression='gzip')
+                                             compression='gzip',
+                                             compression_opts=9
+                                             )
             cursor = 0
             for row in tq:
                 image = wsi.read_region((0, row*S*scale), target_level, (width, S)).convert('RGB')
@@ -151,9 +155,9 @@ class CLI(BaseMLCLI):
                 patch = Image.fromarray(patch)
                 patch = patch.resize((S, S))
                 if a.with_cluster:
-                    if not 'cluster' in f:
-                        raise RuntimeError('cluster data is not detected')
-                    cluster = f['cluster'][i]
+                    if not 'clusters' in f:
+                        raise RuntimeError('clusters data is not found')
+                    cluster = f['clusters'][i]
                     draw = ImageDraw.Draw(patch)
                     if cluster > 0:
                         color = mcolors.rgb2hex(cmap(cluster)[:3])
@@ -202,7 +206,7 @@ class CLI(BaseMLCLI):
 
         assert len(hh) == patch_count
 
-        with h5py.File(a.input_path, 'w') as f:
+        with h5py.File(a.input_path, 'a') as f:
             f.create_dataset('features', data=hh)
 
 
@@ -210,14 +214,20 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
 
     def run_cluster(self, a):
-        with h5py.File(a.input_path, 'a') as f:
-            features = f['features']
-
+        with h5py.File(a.input_path, 'r') as f:
+            features = f['features'][:]
+        print('Loaded features', features.shape)
         scaler = StandardScaler()
         scaled_features = scaler.fit_transform(features)
 
-        reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=a.seed)
+        print('UMAP fitting...')
+        reducer = umap.UMAP(n_neighbors=15,
+                            min_dist=0.1,
+                            n_components=2,
+                            # random_state=a.seed
+                            )
         embedding = reducer.fit_transform(scaled_features)
+        print('Loaded features', features.shape)
 
         dbscan = DBSCAN(eps=0.5, min_samples=5)
         clusters = dbscan.fit_predict(embedding)
@@ -244,6 +254,9 @@ class CLI(BaseMLCLI):
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
         plt.show()
+
+        with h5py.File(a.input_path, 'a') as f:
+            f.create_dataset('clusters', data=clusters)
 
 
 
