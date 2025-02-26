@@ -7,61 +7,30 @@ requires-python = "==3.9.*"
 # package-dir = {"" = "."}
 
 dependencies = [
-    "torch==2.0.0",
-    "torchvision==0.15.1",
-    "torchaudio==2.0.1",
-    "omegaconf",
-    "torchmetrics==0.10.3",
-    "fvcore",
-    "iopath",
-    "xformers==0.0.18",
-    "huggingface-hub==0.20.2",
-    "h5py",
-    "numpy<2",
-    "pandas",
-    "pillow",
-    "einops",
-    "webdataset",
-    "matplotlib",
-    "lifelines",
-    "scikit-survival",
-    "scikit-learn",
-    "tensorboard",
-    "fairscale",
-    "wandb",
-    "timm>=1.0.3",
-    "packaging==23.2",
-    "ninja==1.11.1.1",
-    "transformers==4.36.2",
-    "flash-attn==2.5.8",
-    "monai",
-    "openslide-python",
-    "scikit-image",
-    "psutil",
-    "pydantic==2.10.6",
+    "einops>=0.8.1",
+    "fairscale>=0.4.13",
+    "gigapath",
+    "h5py>=3.13.0",
+    "numpy",
+    "openslide-python>=1.4.1",
+    "pandas>=2.2.3",
+    "pydantic>=2.10.6",
     "taskipy>=1.14.1",
+    "timm>=1.0.15",
+    "torch==2.0.0+cu117",
+    "torchvision==0.15.1",
 ]
-
-[build-system]
-requires = [
-    "setuptools",
-    "wheel",
-    "torch==2.0.0",
-    "psutil",
-]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-packages = ["dlbcl_subtyping"]
-
-[tool.taskipy.tasks]
-main = "python -m dlbcl_subtyping.main"
 
 [tool.uv.sources]
+gigapath = { git = "https://github.com/prov-gigapath/prov-gigapath.git" }
 torch = { index = "pytorch" }
 
 [[tool.uv.index]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu117"
-# default = true
-explicit = true
+
+
+
+[tool.taskipy.tasks]
+main = "python -m dlbcl_subtyping.main"
+
