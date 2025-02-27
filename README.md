@@ -7,6 +7,10 @@
 
 ```
 $ uv sync
+
+# for flash-attn
+$ uv sync --extra build
+$ uv sync --extra build --extra compile
 ```
 
 

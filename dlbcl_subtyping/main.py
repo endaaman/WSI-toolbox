@@ -16,12 +16,15 @@ import hdbscan
 from openslide import OpenSlide
 import torch
 from torchvision import transforms
+from torch.cuda.amp import autocast
 import timm
 from gigapath import slide_encoder
 
 from .utils.cli import BaseMLCLI, BaseMLArgs
 
-warnings.filterwarnings("ignore", category=FutureWarning, message=".*force_all_finite.*")
+
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
+warnings.filterwarnings('ignore', category=FutureWarning, module='timm.models._hub')
 
 
 def yes_no_prompt(question):
@@ -39,6 +42,7 @@ def is_white_patch(patch, white_threshold=230, white_ratio=0.7):
 class CLI(BaseMLCLI):
     class CommonArgs(BaseMLArgs):
         # This includes `--seed` param
+        device: str = 'cuda'
         pass
 
     class Wsi2h5Args(CommonArgs):
@@ -49,6 +53,12 @@ class CLI(BaseMLCLI):
         overwrite: bool = False
 
     def run_wsi2h5(self, a):
+        if os.path.exists(a.output_path):
+            if not a.overwrite:
+                print(f'{a.output_path} exists. Skipping.')
+                return
+            print(f'{a.output_path} exists but overwriting it.')
+
         wsi = OpenSlide(a.input_path)
 
         prop = dict(wsi.properties)
@@ -89,12 +99,6 @@ class CLI(BaseMLCLI):
         total_patches = []
         tq = tqdm(range(row_count))
 
-        if os.path.exists(a.output_path):
-            if a.overwrite:
-                print(f'{a.output_path} exists but overwriting it.')
-            elif not yes_no_prompt(f'{a.output_path} exists. Overwrite?'):
-                print('Aborted.')
-                return
         os.makedirs(os.path.dirname(a.output_path), exist_ok=True)
 
         with h5py.File(a.output_path, 'w') as f:
@@ -150,6 +154,7 @@ class CLI(BaseMLCLI):
         output_path: str = Field('', l='--out', s='-o')
         size: int = 64
         with_cluster: bool = Field(False, s='-C')
+        show: bool = False
 
     def run_preview(self, a):
         S = a.size
@@ -189,25 +194,28 @@ class CLI(BaseMLCLI):
             canvas.save(output_path)
             print(f'wrote {output_path}')
 
-    class ProcessTilesArgs(CommonArgs):
+        if a.show:
+            os.system(f'xdg-open {output_path}')
+
+    class ProcessPatchesArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         batch_size: int = Field(32, s='-B')
         overwrite: bool = False
 
-    def run_process_tiles(self, a):
-        with h5py.File(a.input_path, 'a') as f:
+    def run_process_patches(self, a):
+        with h5py.File(a.input_path, 'r') as f:
             if 'features' in f:
                 if not a.overwrite:
-                    print('feature embeddings are already obtained.')
+                    print('patch embeddings are already obtained.')
                     return
 
         tile_encoder = timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
                                          pretrained=True,
                                          dynamic_img_size=True)
-        tile_encoder = tile_encoder.eval().to('cuda')
+        tile_encoder = tile_encoder.eval().to(a.device)
 
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to('cuda')
-        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to('cuda')
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(a.device)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(a.device)
 
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
@@ -215,14 +223,12 @@ class CLI(BaseMLCLI):
                 (i, min(i+a.batch_size, patch_count))
                 for i in range(0, patch_count, a.batch_size)
             ]
-
             hh = []
-
             for i0, i1 in tqdm(batch_idx):
                 coords = f['coordinates'][i0:i1]
                 x = f['patches'][i0:i1]
                 x = (torch.from_numpy(x)/255).permute(0, 3, 1, 2) # BHWC->BCHW
-                x = x.to('cuda')
+                x = x.to(a.device)
                 x = (x-mean)/std
                 with torch.set_grad_enabled(False):
                     h = tile_encoder(x)
@@ -230,8 +236,7 @@ class CLI(BaseMLCLI):
                 hh.append(h)
             hh = torch.cat(hh).numpy()
 
-        print(hh.shape)
-
+        print('embeddings dimension', hh.shape)
         assert len(hh) == patch_count
 
         with h5py.File(a.input_path, 'a') as f:
@@ -239,6 +244,49 @@ class CLI(BaseMLCLI):
                 print('Overwriting features.')
                 del f['features']
             f.create_dataset('features', data=hh)
+
+
+    class ProcessSlideArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        overwrite: bool = False
+
+    def run_process_slide(self, a):
+        with h5py.File(a.input_path, 'r') as f:
+            if 'slide_feature' in f:
+                if not a.overwrite:
+                    print('feature embeddings are already obtained.')
+                    return
+
+            features = f['features'][:]
+            coords = f['coordinates'][:]
+
+        features = torch.tensor(features, dtype=torch.float32)[None, ...].to(a.device)  # (1, L, D)
+        coords = torch.tensor(coords, dtype=torch.float32)[None, ...].to(a.device)  # (1, L, 2)
+
+        print('Loading LongNet...')
+        long_net = slide_encoder.create_model(
+            'data/slide_encoder.pth',
+            'gigapath_slide_enc12l768d',
+            1536,
+        ).eval().to(a.device)
+
+        print('LongNet loaded.')
+
+        with torch.set_grad_enabled(False):
+            with autocast(a.device, dtype=torch.float16):
+                output = long_net(features, coords)
+            # output = output.cpu().detach()
+            slide_feature = output[0][0].cpu().detach()
+
+
+        print('slide_feature dimension:', slide_feature.shape)
+
+        with h5py.File(a.input_path, 'a') as f:
+            if a.overwrite and 'slide_feature' in f:
+                print('Overwriting slide_feature.')
+                del f['slide_feature']
+            f.create_dataset('slide_feature', data=slide_feature)
+
 
 
     class ClusterArgs(CommonArgs):
@@ -328,7 +376,6 @@ class CLI(BaseMLCLI):
 
         if not a.noshow:
             plt.show()
-
 
 
 if __name__ == '__main__':

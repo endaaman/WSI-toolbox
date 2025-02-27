@@ -13,30 +13,41 @@ dependencies = [
     "h5py>=3.13.0",
     "hdbscan>=0.8.40",
     "matplotlib>=3.9.4",
-    "numpy",
+    "numpy<2",
     "opencv-python-headless>=4.11.0.86",
     "openslide-python>=1.4.1",
     "pandas>=2.2.3",
     "pydantic>=2.10.6",
+    "pyqt6>=6.8.1",
     "scikit-learn>=1.6.1",
     "seahorse>=1.1.5",
     "taskipy>=1.14.1",
     "timm==0.9.16",
-    "torch==2.0.0+cu117",
-    "torchvision==0.15.1",
-    "umap-learn>=0.5.7",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+    "umap-learn==0.5.7",
 ]
 
 [tool.uv.sources]
-gigapath = { git = "https://github.com/prov-gigapath/prov-gigapath.git" }
+gigapath = { git = "https://github.com/prov-gigapath/prov-gigapath.git", rev = "5d77be0"}
 torch = { index = "pytorch" }
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu117"
+url = "https://download.pytorch.org/whl/cu121"
 
+[project.optional-dependencies]
+build = ["torch", "packaging", "wheel", "setuptools"]
+compile = ["flash-attn"]
+
+[tool.uv]
+no-build-isolation-package = ["flash-attn"]
+
+[[tool.uv.dependency-metadata]]
+name = "flash-attn"
+version = "2.5.7"
+requires-dist = ["torch", "einops"]
 
 
 [tool.taskipy.tasks]
 main = "python -m dlbcl_subtyping.main"
-
