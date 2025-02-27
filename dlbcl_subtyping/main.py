@@ -1,8 +1,9 @@
 import os
-import hdbscan
+import warnings
 from tqdm import tqdm
 from pydantic import Field
 from PIL import Image, ImageDraw
+import cv2
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, colors as mcolors
@@ -11,12 +12,16 @@ import h5py
 import umap
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
+import hdbscan
 from openslide import OpenSlide
 import torch
 from torchvision import transforms
 import timm
 from gigapath import slide_encoder
+
 from .utils.cli import BaseMLCLI, BaseMLArgs
+
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*force_all_finite.*")
 
 
 def yes_no_prompt(question):
@@ -39,12 +44,11 @@ class CLI(BaseMLCLI):
     class Wsi2h5Args(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field(..., l='--out', s='-o')
-        patch_size: int = 512
+        patch_size: int = 256
         tile_size: int = 8192
+        overwrite: bool = False
 
     def run_wsi2h5(self, a):
-        # m = slide_encoder.create_model()
-        S = a.patch_size
         wsi = OpenSlide(a.input_path)
 
         prop = dict(wsi.properties)
@@ -53,25 +57,31 @@ class CLI(BaseMLCLI):
             target_level = 0
             scale = 1
         elif original_mpp < 0.360:
-            target_level = 1
+            target_level = 0
             scale = 2
         else:
             raise RuntimeError(f'Invalid scale: mpp={mpp:.6f}')
         mpp = original_mpp * scale
 
+        S = a.patch_size # scaled patch size
+        T = S*scale      # actual patch size
+
         dimension = wsi.level_dimensions[target_level]
         W, H = dimension[0], dimension[1]
 
-        x_patch_count = W//S
-        y_patch_count = H//S
-        width = (W//S)*S
-        row_count = H // S
+        x_patch_count = W//T
+        y_patch_count = H//T
+        width = (W//T)*T
+        row_count = H//T
 
-        print('target level', target_level)
-        print(f'original mpp: {original_mpp:.6f}')
-        print(f'image mpp: {mpp:.6f}')
-        print('Original resolutions', W, H)
+        print('Target level', target_level)
+        print(f'Original mpp: {original_mpp:.6f}')
+        print(f'Image mpp: {mpp:.6f}')
+        print('Targt resolutions', W, H)
         print('Obtained resolutions', x_patch_count*S, y_patch_count*S)
+        print('Scale', scale)
+        print('Patch size', T)
+        print('Scaled patch size', S)
         print('row count:', y_patch_count)
         print('col count:', x_patch_count)
 
@@ -79,11 +89,13 @@ class CLI(BaseMLCLI):
         total_patches = []
         tq = tqdm(range(row_count))
 
-
         if os.path.exists(a.output_path):
-            if not yes_no_prompt(f'{a.output_path} exists. Overwrite?'):
+            if a.overwrite:
+                print(f'{a.output_path} exists but overwriting it.')
+            elif not yes_no_prompt(f'{a.output_path} exists. Overwrite?'):
                 print('Aborted.')
                 return
+        os.makedirs(os.path.dirname(a.output_path), exist_ok=True)
 
         with h5py.File(a.output_path, 'w') as f:
             f.create_dataset('metadata/original_mpp', data=original_mpp)
@@ -91,6 +103,7 @@ class CLI(BaseMLCLI):
             f.create_dataset('metadata/original_height', data=H)
             f.create_dataset('metadata/image_level', data=target_level)
             f.create_dataset('metadata/mpp', data=mpp)
+            f.create_dataset('metadata/scale', data=scale)
             f.create_dataset('metadata/patch_size', data=S)
             f.create_dataset('metadata/cols', data=x_patch_count)
             f.create_dataset('metadata/rows', data=y_patch_count)
@@ -104,8 +117,10 @@ class CLI(BaseMLCLI):
                                              )
             cursor = 0
             for row in tq:
-                image = wsi.read_region((0, row*S*scale), target_level, (width, S)).convert('RGB')
+                image = wsi.read_region((0, row*T), target_level, (width, T)).convert('RGB')
                 image = np.array(image)
+                # image = image.resize((width//scale, S))
+                image = cv2.resize(image, (width//scale, S), interpolation=cv2.INTER_LANCZOS4)
 
                 patches = image.reshape(1, S, x_patch_count, S, 3) # (y, h, x, w, 3)
                 patches = patches.transpose(0, 2, 1, 3, 4)   # (y, x, h, w, 3)
@@ -132,14 +147,19 @@ class CLI(BaseMLCLI):
 
     class PreviewArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
-        output_path: str = Field(..., l='--out', s='-o')
-        size: int = 32
+        output_path: str = Field('', l='--out', s='-o')
+        size: int = 64
         with_cluster: bool = Field(False, s='-C')
 
     def run_preview(self, a):
         S = a.size
 
-        cmap = plt.get_cmap('tab10')
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            output_path = f'{base}.jpg'
+
+        cmap = plt.get_cmap('tab20')
 
         with h5py.File(a.input_path, 'r') as f:
             cols = f['metadata/cols'][()]
@@ -163,16 +183,24 @@ class CLI(BaseMLCLI):
                         color = mcolors.rgb2hex(cmap(cluster)[:3])
                     else:
                         color = 'gray'
-                    draw.rectangle((0, 0, S, S), outline=color, width=2)
+                    draw.rectangle((0, 0, S, S), outline=color, width=4)
                 canvas.paste(patch, (x, y, x+S, y+S))
 
-            canvas.save(a.output_path)
+            canvas.save(output_path)
+            print(f'wrote {output_path}')
 
     class ProcessTilesArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
-        batch_size: int = 32
+        batch_size: int = Field(32, s='-B')
+        overwrite: bool = False
 
     def run_process_tiles(self, a):
+        with h5py.File(a.input_path, 'a') as f:
+            if 'features' in f:
+                if not a.overwrite:
+                    print('feature embeddings are already obtained.')
+                    return
+
         tile_encoder = timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
                                          pretrained=True,
                                          dynamic_img_size=True)
@@ -207,11 +235,18 @@ class CLI(BaseMLCLI):
         assert len(hh) == patch_count
 
         with h5py.File(a.input_path, 'a') as f:
+            if a.overwrite and 'features' in f:
+                print('Overwriting features.')
+                del f['features']
             f.create_dataset('features', data=hh)
 
 
     class ClusterArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
+        method: str = Field('HDBSCAN', s='-M')
+        save: bool = False
+        fig_path: str = ''
+        noshow: bool = False
 
     def run_cluster(self, a):
         with h5py.File(a.input_path, 'r') as f:
@@ -221,16 +256,33 @@ class CLI(BaseMLCLI):
         scaled_features = scaler.fit_transform(features)
 
         print('UMAP fitting...')
-        reducer = umap.UMAP(n_neighbors=15,
-                            min_dist=0.1,
-                            n_components=2,
-                            # random_state=a.seed
-                            )
+        reducer = umap.UMAP(
+                n_neighbors=30,
+                min_dist=0.1,
+                n_components=2,
+                # random_state=a.seed
+            )
         embedding = reducer.fit_transform(scaled_features)
         print('Loaded features', features.shape)
 
-        dbscan = DBSCAN(eps=0.5, min_samples=5)
-        clusters = dbscan.fit_predict(embedding)
+        eps = 0.2
+        if a.method.lower() == 'dbscan':
+            m = DBSCAN(
+                eps=eps,
+                min_samples=5
+            )
+            clusters = m.fit_predict(embedding)
+        elif a.method.lower() == 'hdbscan':
+            m = hdbscan.HDBSCAN(
+                min_cluster_size=5,
+                min_samples=5,
+                cluster_selection_epsilon=eps,
+                metric='euclidean'
+            )
+            clusters = m.fit_predict(embedding)
+        else:
+            raise RuntimeError('Invalid medthod:', a.method)
+
 
         n_clusters = len(set(clusters)) - (1 if -1 in clusters else 0)
         n_noise = list(clusters).count(-1)
@@ -239,24 +291,43 @@ class CLI(BaseMLCLI):
 
 
         plt.figure(figsize=(10, 8))
-        colors = plt.cm.rainbow(np.linspace(0, 1, len(set(clusters))))
-        for cluster_id, color in zip(set(clusters), colors):
+        cmap = plt.get_cmap('tab20')
+        # colors = plt.cm.rainbow(np.linspace(0, 1, len(set(clusters))))
+        cluster_ids = sorted(list(set(clusters)))
+        for i, cluster_id in enumerate(cluster_ids):
+            coords = embedding[clusters == cluster_id]
             if cluster_id == -1:
-                cluster_points = embedding[clusters == cluster_id]
-                plt.scatter(cluster_points[:, 0], cluster_points[:, 1], s=10, c='black', label='Noise')
+                color = 'black'
+                label = 'Noise'
+                size = 20
             else:
-                cluster_points = embedding[clusters == cluster_id]
-                plt.scatter(cluster_points[:, 0], cluster_points[:, 1], s=30, c=[color], label=f'Cluster {cluster_id}')
+                color = [cmap(cluster_id % 20)]
+                label = f'Cluster {cluster_id}'
+                size = 10
+            plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
 
-        plt.title('UMAP + HDBSCAN Clustering')
+        plt.title(f'UMAP + {a.method} Clustering')
         plt.xlabel('UMAP Dimension 1')
         plt.ylabel('UMAP Dimension 2')
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-        plt.show()
 
-        with h5py.File(a.input_path, 'a') as f:
-            f.create_dataset('clusters', data=clusters)
+        if a.save:
+            with h5py.File(a.input_path, 'a') as f:
+                if 'clusters' in f:
+                    del f['clusters']
+                f.create_dataset('clusters', data=clusters)
+            print(f'Save clusters to {a.input_path}')
+
+            fig_path = a.fig_path
+            if not fig_path:
+                base, ext = os.path.splitext(a.input_path)
+                fig_path = f'{base}_umap.png'
+            plt.savefig(fig_path)
+            print(f'wrote {fig_path}')
+
+        if not a.noshow:
+            plt.show()
 
 
 
