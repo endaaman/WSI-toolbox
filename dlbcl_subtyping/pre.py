@@ -12,6 +12,7 @@ import seahorse as sns
 import h5py
 import umap
 from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
 import hdbscan
 from openslide import OpenSlide
@@ -329,6 +330,30 @@ class CLI(BaseMLCLI):
                 metric='euclidean'
             )
             clusters = m.fit_predict(embedding)
+        elif a.method.lower() == 'snn':
+            k = 30  # 近傍数
+            nn = NearestNeighbors(n_neighbors=k).fit(embedding)
+            distances, indices = nn.kneighbors(embedding)
+            n_samples = embedding.shape[0]
+            snn_graph = np.zeros((n_samples, n_samples))
+
+            for i in range(n_samples):
+                for j in range(i+1, n_samples):
+                    # i と j の共有近傍の数を計算
+                    shared_neighbors = len(set(indices[i]) & set(indices[j]))
+                    if shared_neighbors > 0:
+                        similarity = shared_neighbors / k
+                        snn_graph[i, j] = similarity
+                        snn_graph[j, i] = similarity
+
+            m = DBSCAN(
+                eps=0.5,
+                min_samples=5,
+                metric='precomputed'
+            )
+            # 距離行列に変換（類似度が高いほど距離が小さい）
+            distance_matrix = 1 - snn_graph
+            clusters = m.fit_predict(distance_matrix)
         else:
             raise RuntimeError('Invalid medthod:', a.method)
 
@@ -378,6 +403,25 @@ class CLI(BaseMLCLI):
         if not a.noshow:
             plt.show()
 
+    class ExtractGlobalFeaturesArgs(CommonArgs):
+        noshow: bool = False
+
+    def run_extract_global_features(self, a):
+        featuress = []
+        lengths = []
+        for dir in sorted(glob('data/dataset/*')):
+            name = os.path.basename(dir)
+            for i, h5_path in enumerate(sorted(glob(f'{dir}/*.h5'))):
+                with h5py.File(h5_path, 'r') as f:
+                    features = f['features'][:]
+                    lengths.append(len(features))
+                    featuress.append(features)
+
+        features = np.concatenate(featuress)
+
+        with h5py.File('data/global_features.h5', 'w') as f:
+            f.create_dataset('global_features', data=features)
+            f.create_dataset('lengths', data=np.array(lengths))
 
     def run_extract_slide_features(self, a):
         data = []

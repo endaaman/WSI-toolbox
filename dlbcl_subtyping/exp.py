@@ -80,7 +80,10 @@ class CLI(BaseMLCLI):
         else:
             raise RuntimeError('invalid target', a.target)
 
+
+        plt.figure(figsize=(10, 8))
         marker_size = 15
+
         if mode == 'categorical':
             if a.target == 'cluster':
                 eps = 0.2
@@ -95,8 +98,6 @@ class CLI(BaseMLCLI):
             else:
                 labels = df[a.target].fillna(-1)
                 n_labels = len(set(labels))
-
-            plt.figure(figsize=(10, 8))
             cmap = plt.cm.viridis
 
             noise_mask = labels == -1
@@ -142,6 +143,10 @@ class CLI(BaseMLCLI):
 
         if not a.noshow:
             plt.show()
+
+
+
+
 
 if __name__ == '__main__':
     cli = CLI()
