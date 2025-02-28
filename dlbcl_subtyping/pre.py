@@ -1,5 +1,6 @@
 import os
 import warnings
+from glob import glob
 from tqdm import tqdm
 from pydantic import Field
 from PIL import Image, ImageDraw
@@ -16,7 +17,7 @@ import hdbscan
 from openslide import OpenSlide
 import torch
 from torchvision import transforms
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
@@ -24,7 +25,7 @@ from .utils.cli import BaseMLCLI, BaseMLArgs
 
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
-warnings.filterwarnings('ignore', category=FutureWarning, module='timm.models._hub')
+warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
 
 def yes_no_prompt(question):
@@ -149,14 +150,14 @@ class CLI(BaseMLCLI):
         print(f'{len(coordinates)} patches were selected.')
         print('done')
 
-    class PreviewArgs(CommonArgs):
+    class ThumbnailArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         size: int = 64
         with_cluster: bool = Field(False, s='-C')
         show: bool = False
 
-    def run_preview(self, a):
+    def run_thumbnail(self, a):
         S = a.size
 
         output_path = a.output_path
@@ -376,6 +377,33 @@ class CLI(BaseMLCLI):
 
         if not a.noshow:
             plt.show()
+
+
+    def run_extract_slide_features(self, a):
+        data = []
+        features = []
+        for dir in sorted(glob('data/dataset/*')):
+            name = os.path.basename(dir)
+            for i, h5_path in enumerate(sorted(glob(f'{dir}/*.h5'))):
+                with h5py.File(h5_path, 'r') as f:
+                    features.append(f['slide_feature'][:])
+                data.append({
+                    'name': name,
+                    'order': i,
+                    'filename': os.path.basename(h5_path),
+                })
+
+        df = pd.DataFrame(data)
+        features = np.array(features)
+        print('features', features.shape)
+
+        o = 'data/slide_features.h5'
+        with h5py.File(o, 'w') as f:
+            f.create_dataset('features', data=features)
+            f.create_dataset('names', data=df['name'].values)
+            f.create_dataset('orders', data=df['order'].values)
+            f.create_dataset('filenames', data=df['filename'].values)
+        print(f'wrote {o}')
 
 
 if __name__ == '__main__':
