@@ -80,6 +80,7 @@ class CLI(BaseMLCLI):
         else:
             raise RuntimeError('invalid target', a.target)
 
+        marker_size = 15
         if mode == 'categorical':
             if a.target == 'cluster':
                 eps = 0.2
@@ -98,7 +99,6 @@ class CLI(BaseMLCLI):
             plt.figure(figsize=(10, 8))
             cmap = plt.cm.viridis
 
-            marker_size = 15
             noise_mask = labels == -1
             valid_labels = sorted(list(set(labels[~noise_mask])))
             norm = plt.Normalize(min(valid_labels or [0]), max(valid_labels or [1]))
