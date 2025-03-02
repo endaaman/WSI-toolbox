@@ -22,7 +22,7 @@ from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
-from .utils.cli import BaseMLCLI, BaseMLArgs
+from .utils import BaseMLCLI, BaseMLArgs, hover_images_on_scatters
 
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
@@ -453,6 +453,7 @@ class CLI(BaseMLCLI):
 
     def run_global_cluster(self, a):
         features = []
+        images = []
         dfs = []
         for dir in sorted(glob('data/dataset/*')):
             name = os.path.basename(dir)
@@ -462,6 +463,7 @@ class CLI(BaseMLCLI):
                     ii = np.random.choice(patch_count, size=a.n_samples, replace=False)
                     ii = np.sort(ii)
                     features.append(f['features'][ii])
+                    images.append(f['patches'][ii])
                     df_wsi = pd.DataFrame({'index': ii})
                 df_wsi['name'] = os.path.basename(dir)
                 df_wsi['order'] = i
@@ -470,11 +472,14 @@ class CLI(BaseMLCLI):
 
         df = pd.concat(dfs)
         features = np.concatenate(features)
+        images = np.concatenate(images)
+        # images = [Image.fromarray(i) for i in images]
 
         print('Loaded features', features.dtype, features.shape)
         scaler = StandardScaler()
         scaled_features = scaler.fit_transform(features)
 
+        print('UMAP fitting...')
         reducer = umap.UMAP(
                 n_neighbors=80,
                 min_dist=0.3,
@@ -483,8 +488,10 @@ class CLI(BaseMLCLI):
                 # random_state=a.seed
             )
         embedding = reducer.fit_transform(scaled_features)
+        print('UMAP ok')
 
-        plt.scatter(embedding[:, 0], embedding[:, 1], s=1)
+        scatter = plt.scatter(embedding[:, 0], embedding[:, 1], s=5)
+        hover_images_on_scatters([scatter], [images])
         plt.title(f'UMAP')
         plt.xlabel('UMAP Dimension 1')
         plt.ylabel('UMAP Dimension 2')
