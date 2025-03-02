@@ -140,11 +140,54 @@ class CLI(BaseMLCLI):
         os.makedirs('out/umap', exist_ok=True)
         name = a.target.replace(' ', '_')
         plt.savefig(f'out/umap/umap_{name}.png')
-
         if not a.noshow:
             plt.show()
 
+    class GlobalClusterArgs(CommonArgs):
+        noshow: bool = False
+        n_samples: int = 100
 
+    def run_global_cluster(self, a):
+        result = []
+
+        with h5py.File('data/global_features.h5', 'r') as f:
+            global_features = f['global_features'][:]
+            lengths = f['lengths'][:]
+
+        selected_features = []
+        iii = []
+
+        cursor = 0
+        for l in lengths:
+            slice = global_features[cursor:cursor+l]
+            ii = np.random.choice(slice.shape[0], size=a.n_samples, replace=False)
+            iii.append(ii)
+            selected_features.append(slice[ii])
+            cursor += l
+        selected_features = np.concatenate(selected_features)
+
+        features = selected_features
+
+        print('Loaded features', features.dtype, features.shape)
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
+
+        reducer = umap.UMAP(
+                n_neighbors=80,
+                min_dist=0.3,
+                n_components=2,
+                metric='cosine',
+                # random_state=a.seed
+            )
+        embedding = reducer.fit_transform(scaled_features)
+
+        plt.scatter(embedding[:, 0], embedding[:, 1], s=1)
+        plt.title(f'UMAP')
+        plt.xlabel('UMAP Dimension 1')
+        plt.ylabel('UMAP Dimension 2')
+        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        plt.show()
 
 
 

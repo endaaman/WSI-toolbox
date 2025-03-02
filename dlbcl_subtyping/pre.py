@@ -280,7 +280,6 @@ class CLI(BaseMLCLI):
             # output = output.cpu().detach()
             slide_feature = output[0][0].cpu().detach()
 
-
         print('slide_feature dimension:', slide_feature.shape)
 
         with h5py.File(a.input_path, 'a') as f:
@@ -288,7 +287,6 @@ class CLI(BaseMLCLI):
                 print('Overwriting slide_feature.')
                 del f['slide_feature']
             f.create_dataset('slide_feature', data=slide_feature)
-
 
 
     class ClusterArgs(CommonArgs):
@@ -356,7 +354,6 @@ class CLI(BaseMLCLI):
             clusters = m.fit_predict(distance_matrix)
         else:
             raise RuntimeError('Invalid medthod:', a.method)
-
 
         n_clusters = len(set(clusters)) - (1 if -1 in clusters else 0)
         n_noise = list(clusters).count(-1)
