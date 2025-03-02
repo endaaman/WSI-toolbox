@@ -34,7 +34,6 @@ class CLI(BaseMLCLI):
         noshow: bool = False
 
     def run_cluster(self, a):
-        df_clinical = pd.read_excel('./data/clinical_data_cleaned.xlsx', index_col=0)
         with h5py.File('data/slide_features.h5', 'r') as f:
             features = f['features'][:]
             df = pd.DataFrame({
@@ -43,6 +42,7 @@ class CLI(BaseMLCLI):
                 'order': f['orders'][:],
             })
 
+        df_clinical = pd.read_excel('./data/clinical_data_cleaned.xlsx', index_col=0)
         df = pd.merge(
             df,
             df_clinical,

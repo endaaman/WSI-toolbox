@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, colors as mcolors
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox, TextArea, VPacker
 import seahorse as sns
 import h5py
 import umap
@@ -361,7 +362,7 @@ class CLI(BaseMLCLI):
         print('n_noise', n_noise)
 
 
-        plt.figure(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(10, 8))
         cmap = plt.get_cmap('tab20')
         # colors = plt.cm.rainbow(np.linspace(0, 1, len(set(clusters))))
         cluster_ids = sorted(list(set(clusters)))
@@ -465,12 +466,21 @@ class CLI(BaseMLCLI):
                     features.append(f['features'][ii])
                     images.append(f['patches'][ii])
                     df_wsi = pd.DataFrame({'index': ii})
-                df_wsi['name'] = os.path.basename(dir)
+                df_wsi['name'] = int(os.path.basename(dir))
                 df_wsi['order'] = i
                 df_wsi['filename'] = os.path.basename(h5_path)
                 dfs.append(df_wsi)
 
         df = pd.concat(dfs)
+        df_clinical = pd.read_excel('./data/clinical_data_cleaned.xlsx', index_col=0)
+        df = pd.merge(
+            df,
+            df_clinical,
+            left_on='name',
+            right_index=True,
+            how='left'
+        )
+
         features = np.concatenate(features)
         images = np.concatenate(images)
         # images = [Image.fromarray(i) for i in images]
@@ -481,17 +491,38 @@ class CLI(BaseMLCLI):
 
         print('UMAP fitting...')
         reducer = umap.UMAP(
-                n_neighbors=80,
-                min_dist=0.3,
+                # n_neighbors=80,
+                # min_dist=0.3,
                 n_components=2,
                 metric='cosine',
+                min_dist=0.5,
+                spread=2.0
                 # random_state=a.seed
             )
         embedding = reducer.fit_transform(scaled_features)
         print('UMAP ok')
 
-        scatter = plt.scatter(embedding[:, 0], embedding[:, 1], s=5)
-        hover_images_on_scatters([scatter], [images])
+        # scatter = plt.scatter(embedding[:, 0], embedding[:, 1], s=5, c=df['LDH'].values)
+        # hover_images_on_scatters([scatter], [images])
+
+        target = 'HANS'
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        plt.scatter(embedding[:, 0], embedding[:, 1], alpha=0)
+        for (x, y), image, (_idx, row) in zip(embedding, images, df.iterrows()):
+            img = OffsetImage(image, zoom=.125)
+            value = row[target]
+
+            text = TextArea(row['name'], textprops=dict(color='#000', ha='center'))
+            vpack = VPacker(children=[text, img], align='center', pad=1)
+
+            cmap = plt.cm.viridis
+            color = '#333' if value < 0 else cmap(value)
+            bbox_props = dict(boxstyle='square,pad=0.1', edgecolor=color, linewidth=1, facecolor='none')
+
+            ab = AnnotationBbox(vpack, (x, y), frameon=True, bboxprops=bbox_props)
+            ax.add_artist(ab)
+
         plt.title(f'UMAP')
         plt.xlabel('UMAP Dimension 1')
         plt.ylabel('UMAP Dimension 2')
