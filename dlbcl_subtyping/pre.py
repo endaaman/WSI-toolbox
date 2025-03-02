@@ -447,6 +447,54 @@ class CLI(BaseMLCLI):
         print(f'wrote {o}')
 
 
+    class GlobalClusterArgs(CommonArgs):
+        noshow: bool = False
+        n_samples: int = Field(100, s='-N')
+
+    def run_global_cluster(self, a):
+        features = []
+        dfs = []
+        for dir in sorted(glob('data/dataset/*')):
+            name = os.path.basename(dir)
+            for i, h5_path in enumerate(sorted(glob(f'{dir}/*.h5'))):
+                with h5py.File(h5_path, 'r') as f:
+                    patch_count = f['metadata/patch_count'][()]
+                    ii = np.random.choice(patch_count, size=a.n_samples, replace=False)
+                    ii = np.sort(ii)
+                    features.append(f['features'][ii])
+                    df_wsi = pd.DataFrame({'index': ii})
+                df_wsi['name'] = os.path.basename(dir)
+                df_wsi['order'] = i
+                df_wsi['filename'] = os.path.basename(h5_path)
+                dfs.append(df_wsi)
+
+        df = pd.concat(dfs)
+        features = np.concatenate(features)
+
+        print('Loaded features', features.dtype, features.shape)
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
+
+        reducer = umap.UMAP(
+                n_neighbors=80,
+                min_dist=0.3,
+                n_components=2,
+                metric='cosine',
+                # random_state=a.seed
+            )
+        embedding = reducer.fit_transform(scaled_features)
+
+        plt.scatter(embedding[:, 0], embedding[:, 1], s=1)
+        plt.title(f'UMAP')
+        plt.xlabel('UMAP Dimension 1')
+        plt.ylabel('UMAP Dimension 2')
+        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        plt.show()
+
+
+
+
 if __name__ == '__main__':
     cli = CLI()
     cli.run()
