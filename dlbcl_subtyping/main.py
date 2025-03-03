@@ -35,11 +35,28 @@ def yes_no_prompt(question):
     response = input().lower()
     return response == "" or response.startswith("y")
 
-def is_white_patch(patch, white_threshold=230, white_ratio=0.7):
-    gray_patch = np.mean(patch, axis=-1)
-    white_pixels = np.sum(gray_patch > white_threshold)
+# def is_white_patch(patch, white_threshold=200, white_ratio=0.7):
+#     gray_patch = np.mean(patch, axis=-1)
+#     white_pixels = np.sum(gray_patch > white_threshold)
+#     total_pixels = patch.shape[0] * patch.shape[1]
+#     return (white_pixels / total_pixels) > white_ratio
+
+def is_white_patch(patch, rgb_std_threshold=5.0, sat_threshold=15, white_ratio=0.7):
+    # RGB std < 2.0 and Sat(HSV) < 15
+    patch_hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
+    rgb_std = np.std(patch, axis=2)
+    saturation = patch_hsv[:, :, 1]
+    white_pixels = np.sum((rgb_std < rgb_std_threshold) & (saturation < sat_threshold))
+
     total_pixels = patch.shape[0] * patch.shape[1]
-    return (white_pixels / total_pixels) > white_ratio
+    white_ratio_calculated = white_pixels / total_pixels
+    # print(patch.shape, '{:.4f} {:.4f} {:.4f}'.format(
+    #             white_ratio_calculated,
+    #             np.sum(saturation < sat_threshold)/total_pixels,
+    #             np.sum(rgb_std < rgb_std_threshold)/total_pixels
+    #         )
+    #     )
+    return white_ratio_calculated > white_ratio
 
 
 class CLI(BaseMLCLI):
@@ -100,7 +117,6 @@ class CLI(BaseMLCLI):
 
         coordinates = []
         total_patches = []
-        tq = tqdm(range(row_count))
 
         os.makedirs(os.path.dirname(a.output_path), exist_ok=True)
 
@@ -123,6 +139,7 @@ class CLI(BaseMLCLI):
                                              compression_opts=9
                                              )
             cursor = 0
+            tq = tqdm(range(row_count))
             for row in tq:
                 image = wsi.read_region((0, row*T), target_level, (width, T)).convert('RGB')
                 image = np.array(image)
@@ -143,6 +160,8 @@ class CLI(BaseMLCLI):
                 batch = np.array(batch)
                 total_patches[cursor:cursor+len(batch), ...] = batch
                 cursor += len(batch)
+                tq.set_description(f'selected patch count {len(batch)}/{len(patches)} ({row}/{y_patch_count})')
+                tq.refresh()
 
             patch_count = len(coordinates)
             f.create_dataset('coordinates', data=coordinates)

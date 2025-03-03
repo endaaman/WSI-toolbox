@@ -1,5 +1,6 @@
 import os
 import warnings
+
 from glob import glob
 from tqdm import tqdm
 from pydantic import Field
@@ -190,6 +191,84 @@ class CLI(BaseMLCLI):
         plt.show()
 
 
+    class ImageHistArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+
+
+    def run_image_hist(self, a):
+        img = cv2.imread(a.input_path)
+        # BGRからRGBとHSVに変換
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+        # 8つのサブプロットを作成 (4x2)
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+
+        # RGBヒストグラム
+        for i, color in enumerate(['r', 'g', 'b']):
+            # ヒストグラムを計算
+            hist = cv2.calcHist([rgb], [i], None, [256], [0, 256])
+            # プロット
+            axes[0, i].plot(hist, color=color)
+            axes[0, i].set_xlim([0, 256])
+            axes[0, i].set_xticks(range(0, 257, 10))  # 10刻みでメモリを設定
+            axes[0, i].set_title(f'{color.upper()} Histogram')
+            axes[0, i].grid(True)
+
+        # RGB平均値ヒストグラム（グレースケール）
+        kernel_size = 3
+        mean_rgb = cv2.blur(rgb, (kernel_size, kernel_size))
+
+        # 各ピクセルでRGBの平均を計算してグレースケールに変換
+        gray_from_rgb = np.mean(mean_rgb, axis=2).astype(np.uint8)
+
+        # グレースケール画像のヒストグラムを計算
+        gray_hist = cv2.calcHist([gray_from_rgb], [0], None, [256], [0, 256])
+
+        # ヒストグラムをプロット
+        axes[0, 3].plot(gray_hist, color='gray')
+        axes[0, 3].set_xlim([0, 256])
+        axes[0, 3].set_title('Grayscale (RGB Mean) Histogram')
+        axes[0, 3].grid(True)
+
+        # HSVヒストグラム
+        colors = ['r', 'g', 'b']  # プロット用の色（実際のHSVとは無関係）
+        titles = ['Hue', 'Saturation', 'Value']
+        ranges = [[0, 180], [0, 256], [0, 256]]  # H: 0-179, S: 0-255, V: 0-255
+        for i in range(3):
+            # ヒストグラムを計算
+            hist = cv2.calcHist([hsv], [i], None, [ranges[i][1]], ranges[i])
+            # プロット
+            axes[1, i].plot(hist, color=colors[i])
+            axes[1, i].set_xlim(ranges[i])
+            axes[1, i].set_xticks(range(0, ranges[i][1] + 1, 10))
+            axes[1, i].set_title(f'{titles[i]} Histogram')
+            axes[1, i].grid(True)
+
+        # RGB標準偏差ヒストグラム
+        # 標準偏差を計算
+        mean_squared = cv2.blur(np.square(rgb.astype(np.float32)), (kernel_size, kernel_size))
+        squared_mean = np.square(mean_rgb.astype(np.float32))
+        std_rgb = np.sqrt(np.maximum(0, mean_squared - squared_mean)).astype(np.uint8)
+
+        # RGBチャンネルの標準偏差の平均を計算
+        std_gray = np.mean(std_rgb, axis=2).astype(np.uint8)
+
+        # 表示幅を調整
+        max_std_value = np.max(std_gray)
+        histogram_range = [0, 20]
+
+        # ヒストグラムを計算
+        std_hist = cv2.calcHist([std_gray], [0], None, [max_std_value+1], histogram_range)
+
+        # ヒストグラムをプロット
+        axes[1, 3].plot(std_hist, color='orange')
+        axes[1, 3].set_xlim(histogram_range)
+        axes[1, 3].set_title(f'RGB Std Histogram (Range: 0-{max_std_value})')
+        axes[1, 3].grid(True)
+
+        plt.tight_layout()
+        plt.show()
 
 if __name__ == '__main__':
     cli = CLI()
