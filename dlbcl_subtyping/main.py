@@ -366,12 +366,10 @@ class CLI(BaseMLCLI):
             distance_matrix = 1 - snn_graph
             clusters = m.fit_predict(distance_matrix)
         elif a.method.lower() == 'leiden':
-            # Create a k-nearest neighbors graph
-            k = 100  # Number of neighbors
+            k = 50  # Number of neighbors
             nn = NearestNeighbors(n_neighbors=k).fit(embedding)
             distances, indices = nn.kneighbors(embedding)
 
-            # Create a NetworkX graph
             G = nx.Graph()
             n_samples = embedding.shape[0]
             G.add_nodes_from(range(n_samples))
@@ -390,13 +388,12 @@ class CLI(BaseMLCLI):
             weights = [G[u][v]['weight'] for u, v in edges]
             ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
 
-            # Run Leiden algorithm
             partition = la.find_partition(
                 ig_graph,
                 la.RBConfigurationVertexPartition,
                 weights='weight',
                 # resolution_parameter=1.0,
-                resolution_parameter=0.5, # more coarse cluster
+                resolution_parameter=0.3, # more coarse cluster
             )
 
             # Convert partition result to cluster assignments
@@ -404,8 +401,6 @@ class CLI(BaseMLCLI):
             for i, community in enumerate(partition):
                 for node in community:
                     clusters[node] = i
-
-
         else:
             raise RuntimeError('Invalid medthod:', a.method)
 
@@ -424,11 +419,11 @@ class CLI(BaseMLCLI):
             if cluster_id == -1:
                 color = 'black'
                 label = 'Noise'
-                size = 20
+                size = 12
             else:
                 color = [cmap(cluster_id % 20)]
                 label = f'Cluster {cluster_id}'
-                size = 10
+                size = 7
             plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
 
         plt.title(f'UMAP + {a.method} Clustering')
