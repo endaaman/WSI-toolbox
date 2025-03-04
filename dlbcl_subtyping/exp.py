@@ -15,6 +15,7 @@ import h5py
 import umap
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
+from sklearn.decomposition import PCA
 import hdbscan
 import torch
 import timm
@@ -327,6 +328,47 @@ class CLI(BaseMLCLI):
         axes[2, 3].grid(True)
 
         plt.tight_layout()
+        plt.show()
+
+    class PcaDimArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        models: list[str] = Field(['gigapath'], choices=['uni', 'gigapath'])
+
+    def run_pca_dim(self, a):
+        with h5py.File(a.input_path, 'r') as f:
+            patch_count = f['metadata/patch_count'][()]
+            if 'gigapath' in a.models:
+                if 'gigapath/features' in f:
+                    features0 = f['gigapath/features'][:]
+                else:
+                    features0 = f['features'][:]
+            else:
+                features0 = np.zeros([patch_count, 0]) # dummy
+
+            if 'uni' in a.models:
+                features1 = f['uni/features'][:]
+            else:
+                features1 = np.zeros([patch_count, 0]) # dummy
+
+            features = np.concatenate([features0, features1], axis=1)
+
+        pca = PCA().fit(features)
+
+        # 累積説明分散プロット
+        plt.figure(figsize=(10, 6))
+        plt.plot(np.cumsum(pca.explained_variance_ratio_))
+        plt.xlabel('Number of Dimensions')
+        plt.ylabel('Cumulative Explained Variance')
+        plt.grid(True)
+        plt.axhline(y=0.9, color='r', linestyle='-')  # 90%ラインを表示
+        plt.axhline(y=0.95, color='g', linestyle='-')  # 95%ラインを表示
+
+        # 90%と95%の説明分散を達成する次元数を表示
+        dim_90 = np.argmax(np.cumsum(pca.explained_variance_ratio_) >= 0.9) + 1
+        dim_95 = np.argmax(np.cumsum(pca.explained_variance_ratio_) >= 0.95) + 1
+        print(f"90%の説明分散を達成する次元数: {dim_90}")
+        print(f"95%の説明分散を達成する次元数: {dim_95}")
+
         plt.show()
 
 if __name__ == '__main__':

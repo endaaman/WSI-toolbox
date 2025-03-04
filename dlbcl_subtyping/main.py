@@ -3,7 +3,7 @@ import warnings
 from glob import glob
 from tqdm import tqdm
 from pydantic import Field
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import cv2
 import numpy as np
 import pandas as pd
@@ -177,7 +177,7 @@ class CLI(BaseMLCLI):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}.jpg'
+            output_path = f'{base}_thumb.jpg'
 
         cmap = plt.get_cmap('tab20')
 
@@ -186,6 +186,28 @@ class CLI(BaseMLCLI):
             rows = f['metadata/rows'][()]
             patch_count = f['metadata/patch_count'][()]
             patch_size = f['metadata/patch_size'][()]
+            clusters = f['clusters'][:]
+
+            # font = ImageFont.load_default()
+            font = ImageFont.truetype('/usr/share/fonts/TTF/DejaVuSans.ttf', size=16)
+
+            frames = {}
+            if a.with_cluster:
+                for cluster in np.unique(clusters).tolist() + [-1]:
+                    frame = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+                    if cluster < 0:
+                        color = '#111'
+                    else:
+                        color = mcolors.rgb2hex(cmap(cluster)[:3])
+                    draw = ImageDraw.Draw(frame)
+                    draw.rectangle((0, 0, S, S), outline=color, width=4)
+                    text = f'{cluster}'
+                    text_color = 'white' if mcolors.rgb_to_hsv(mcolors.hex2color(color))[2]<0.9 else 'black'
+                    bbox = np.array(draw.textbbox((0, 0), text, font=font))
+                    w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+                    draw.rectangle((4, 4, bbox[2]+4, bbox[3]+4), fill=color)
+                    draw.text((1, 1), text, font=font, fill=text_color)
+                    frames[cluster] = frame
 
             canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
             for i in tqdm(range(patch_count)):
@@ -197,13 +219,15 @@ class CLI(BaseMLCLI):
                 if a.with_cluster:
                     if not 'clusters' in f:
                         raise RuntimeError('clusters data is not found')
-                    cluster = f['clusters'][i]
-                    draw = ImageDraw.Draw(patch)
-                    if cluster > 0:
-                        color = mcolors.rgb2hex(cmap(cluster)[:3])
-                    else:
-                        color = 'gray'
-                    draw.rectangle((0, 0, S, S), outline=color, width=4)
+                    frame = frames[clusters[i]]
+                    patch.paste(frame, (0, 0), frame)
+                    # cluster = clusters[i]
+                    # draw = ImageDraw.Draw(patch)
+                    # if cluster > 0:
+                    #     color = mcolors.rgb2hex(cmap(cluster)[:3])
+                    # else:
+                    #     color = 'gray'
+                    # draw.rectangle((0, 0, S, S), outline=color, width=4)
                 canvas.paste(patch, (x, y, x+S, y+S))
 
             canvas.save(output_path)
@@ -216,18 +240,29 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         batch_size: int = Field(512, s='-B')
         overwrite: bool = False
+        model_name: str = Field('gigapath', choice=['gigapath', 'uni'], l='--model', s='-M')
 
     def run_process_patches(self, a):
+        target_name = f'{a.model_name}/features'
         with h5py.File(a.input_path, 'r') as f:
-            if 'features' in f:
+            if target_name in f:
                 if not a.overwrite:
                     print('patch embeddings are already obtained.')
                     return
 
-        tile_encoder = timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
-                                         pretrained=True,
-                                         dynamic_img_size=True)
-        tile_encoder = tile_encoder.eval().to(a.device)
+        if a.model_name == 'uni':
+            model = timm.create_model('hf-hub:MahmoodLab/uni',
+                                      pretrained=True,
+                                      dynamic_img_size=True,
+                                      init_values=1e-5)
+        elif a.model_name == 'gigapath':
+            model = timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
+                                      pretrained=True,
+                                      dynamic_img_size=True)
+        else:
+            raise ValueError('Invalid model_name', a.model_name)
+
+        model = model.eval().to(a.device)
 
         mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(a.device)
         std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(a.device)
@@ -246,7 +281,7 @@ class CLI(BaseMLCLI):
                 x = x.to(a.device)
                 x = (x-mean)/std
                 with torch.set_grad_enabled(False):
-                    h = tile_encoder(x)
+                    h = model(x)
                 h = h.cpu().detach()
                 hh.append(h)
             hh = torch.cat(hh).numpy()
@@ -257,8 +292,8 @@ class CLI(BaseMLCLI):
         with h5py.File(a.input_path, 'a') as f:
             if a.overwrite and 'features' in f:
                 print('Overwriting features.')
-                del f['features']
-            f.create_dataset('features', data=hh)
+                del f[target_name]
+            f.create_dataset(target_name, data=hh)
 
 
     class ProcessSlideArgs(CommonArgs):
@@ -304,15 +339,30 @@ class CLI(BaseMLCLI):
 
     class ClusterArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
-        method: str = Field('HDBSCAN', s='-M')
-        use_pca: bool = False
+        models: list[str] = Field(['gigapath'], choices=['uni', 'gigapath'])
+        method: str = Field('leiden', s='-M')
         save: bool = False
-        fig_path: str = ''
         noshow: bool = False
 
     def run_cluster(self, a):
+        assert len(a.models) > 0
         with h5py.File(a.input_path, 'r') as f:
-            features = f['features'][:]
+            patch_count = f['metadata/patch_count'][()]
+            if 'gigapath' in a.models:
+                if 'gigapath/features' in f:
+                    features0 = f['gigapath/features'][:]
+                else:
+                    features0 = f['features'][:]
+            else:
+                features0 = np.zeros([patch_count, 0]) # dummy
+
+            if 'uni' in a.models:
+                features1 = f['uni/features'][:]
+            else:
+                features1 = np.zeros([patch_count, 0]) # dummy
+
+            features = np.concatenate([features0, features1], axis=1)
+
         print('Loaded features', features.shape)
         scaler = StandardScaler()
         scaled_features = scaler.fit_transform(features)
@@ -327,22 +377,9 @@ class CLI(BaseMLCLI):
         embedding = reducer.fit_transform(scaled_features)
         print('UMAP done')
 
-        if a.use_pca:
-            print('using PCA')
-            pca = PCA(n_components=100)
-            target_features = pca.fit_transform(scaled_features)
-        else:
-            print('using coordinates')
-            target_features = embedding
-
         eps = 0.2
-        if a.method.lower() == 'dbscan':
-            m = DBSCAN(
-                eps=eps,
-                min_samples=5
-            )
-            clusters = m.fit_predict(target_features)
-        elif a.method.lower() == 'hdbscan':
+        if a.method.lower() == 'hdbscan':
+            target_features = embedding
             m = hdbscan.HDBSCAN(
                 min_cluster_size=5,
                 min_samples=5,
@@ -351,32 +388,11 @@ class CLI(BaseMLCLI):
             )
             clusters = m.fit_predict(target_features)
             # clusters = m.fit_predict(scaled_features)
-        elif a.method.lower() == 'snn':
-            k = 50
-            nn = NearestNeighbors(n_neighbors=k).fit(target_features)
-            distances, indices = nn.kneighbors(target_features)
-            n_samples = embedding.shape[0]
-            snn_graph = np.zeros((n_samples, n_samples))
-
-            for i in range(n_samples):
-                for j in range(i+1, n_samples):
-                    # i と j の共有近傍の数を計算
-                    shared_neighbors = len(set(indices[i]) & set(indices[j]))
-                    if shared_neighbors > 0:
-                        similarity = shared_neighbors / k
-                        snn_graph[i, j] = similarity
-                        snn_graph[j, i] = similarity
-
-            m = DBSCAN(
-                eps=0.5,
-                min_samples=5,
-                metric='precomputed'
-            )
-            # 距離行列に変換（類似度が高いほど距離が小さい）
-            distance_matrix = 1 - snn_graph
-            clusters = m.fit_predict(distance_matrix)
         elif a.method.lower() == 'leiden':
-            k = 50
+            pca = PCA(n_components=300 if len(a.models)>2 else 200)
+            target_features = pca.fit_transform(scaled_features)
+
+            k = int(np.sqrt(len(target_features)))
             nn = NearestNeighbors(n_neighbors=k).fit(target_features)
             distances, indices = nn.kneighbors(target_features)
 
@@ -402,8 +418,8 @@ class CLI(BaseMLCLI):
                 ig_graph,
                 la.RBConfigurationVertexPartition,
                 weights='weight',
-                # resolution_parameter=1.0,
-                resolution_parameter=0.3, # more coarse cluster
+                resolution_parameter=1.0,
+                # resolution_parameter=0.3, # more coarse cluster
             )
 
             # Convert partition result to cluster assignments
@@ -449,10 +465,8 @@ class CLI(BaseMLCLI):
                 f.create_dataset('clusters', data=clusters)
             print(f'Save clusters to {a.input_path}')
 
-            fig_path = a.fig_path
-            if not fig_path:
-                base, ext = os.path.splitext(a.input_path)
-                fig_path = f'{base}_umap.png'
+            base, ext = os.path.splitext(a.input_path)
+            fig_path = f'{base}_umap.png'
             plt.savefig(fig_path)
             print(f'wrote {fig_path}')
 
