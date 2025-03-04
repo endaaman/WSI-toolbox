@@ -15,6 +15,9 @@ import umap
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
+import networkx as nx
+import leidenalg as la
+import igraph as ig
 import hdbscan
 from openslide import OpenSlide
 import torch
@@ -362,6 +365,47 @@ class CLI(BaseMLCLI):
             # 距離行列に変換（類似度が高いほど距離が小さい）
             distance_matrix = 1 - snn_graph
             clusters = m.fit_predict(distance_matrix)
+        elif a.method.lower() == 'leiden':
+            # Create a k-nearest neighbors graph
+            k = 100  # Number of neighbors
+            nn = NearestNeighbors(n_neighbors=k).fit(embedding)
+            distances, indices = nn.kneighbors(embedding)
+
+            # Create a NetworkX graph
+            G = nx.Graph()
+            n_samples = embedding.shape[0]
+            G.add_nodes_from(range(n_samples))
+
+            # Add edges based on k-nearest neighbors
+            for i in range(n_samples):
+                for j in indices[i]:
+                    if i != j:  # Avoid self-loops
+                        # Add edge weight based on distance (closer points have higher weights)
+                        distance = np.linalg.norm(embedding[i] - embedding[j])
+                        weight = np.exp(-distance)  # Convert distance to similarity
+                        G.add_edge(i, j, weight=weight)
+
+            # Convert NetworkX graph to igraph for Leiden algorithm
+            edges = list(G.edges())
+            weights = [G[u][v]['weight'] for u, v in edges]
+            ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
+
+            # Run Leiden algorithm
+            partition = la.find_partition(
+                ig_graph,
+                la.RBConfigurationVertexPartition,
+                weights='weight',
+                # resolution_parameter=1.0,
+                resolution_parameter=0.5, # more coarse cluster
+            )
+
+            # Convert partition result to cluster assignments
+            clusters = np.full(n_samples, -1)  # Initialize all as noise
+            for i, community in enumerate(partition):
+                for node in community:
+                    clusters[node] = i
+
+
         else:
             raise RuntimeError('Invalid medthod:', a.method)
 
