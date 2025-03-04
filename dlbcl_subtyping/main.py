@@ -35,27 +35,16 @@ def yes_no_prompt(question):
     response = input().lower()
     return response == "" or response.startswith("y")
 
-# def is_white_patch(patch, white_threshold=200, white_ratio=0.7):
-#     gray_patch = np.mean(patch, axis=-1)
-#     white_pixels = np.sum(gray_patch > white_threshold)
-#     total_pixels = patch.shape[0] * patch.shape[1]
-#     return (white_pixels / total_pixels) > white_ratio
 
-def is_white_patch(patch, rgb_std_threshold=5.0, sat_threshold=15, white_ratio=0.7):
-    # RGB std < 2.0 and Sat(HSV) < 15
-    patch_hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
-    rgb_std = np.std(patch, axis=2)
-    saturation = patch_hsv[:, :, 1]
-    white_pixels = np.sum((rgb_std < rgb_std_threshold) & (saturation < sat_threshold))
-
+def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
+    # white: RGB std < 5.0
+    rgb_std_pixels = np.std(patch, axis=2) < rgb_std_threshold
+    white_pixels = np.sum(rgb_std_pixels)
     total_pixels = patch.shape[0] * patch.shape[1]
     white_ratio_calculated = white_pixels / total_pixels
-    # print(patch.shape, '{:.4f} {:.4f} {:.4f}'.format(
-    #             white_ratio_calculated,
-    #             np.sum(saturation < sat_threshold)/total_pixels,
-    #             np.sum(rgb_std < rgb_std_threshold)/total_pixels
-    #         )
-    #     )
+    # print('whi' if white_ratio_calculated > white_ratio else 'use',
+    #       'std{:.3f}'.format(np.sum(rgb_std_pixels)/total_pixels)
+    #      )
     return white_ratio_calculated > white_ratio
 
 
@@ -171,14 +160,14 @@ class CLI(BaseMLCLI):
         print(f'{len(coordinates)} patches were selected.')
         print('done')
 
-    class ThumbnailArgs(CommonArgs):
+    class PreviewArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         size: int = 64
         with_cluster: bool = Field(False, s='-C')
         show: bool = False
 
-    def run_thumbnail(self, a):
+    def run_preview(self, a):
         S = a.size
 
         output_path = a.output_path
@@ -221,7 +210,7 @@ class CLI(BaseMLCLI):
 
     class ProcessPatchesArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
-        batch_size: int = Field(32, s='-B')
+        batch_size: int = Field(512, s='-B')
         overwrite: bool = False
 
     def run_process_patches(self, a):
@@ -325,13 +314,13 @@ class CLI(BaseMLCLI):
 
         print('UMAP fitting...')
         reducer = umap.UMAP(
-                n_neighbors=30,
-                min_dist=0.1,
+                # n_neighbors=30,
+                # min_dist=0.05,
                 n_components=2,
                 # random_state=a.seed
             )
         embedding = reducer.fit_transform(scaled_features)
-        print('Loaded features', features.shape)
+        print('UMAP done')
 
         eps = 0.2
         if a.method.lower() == 'dbscan':
@@ -348,6 +337,7 @@ class CLI(BaseMLCLI):
                 metric='euclidean'
             )
             clusters = m.fit_predict(embedding)
+            # clusters = m.fit_predict(scaled_features)
         elif a.method.lower() == 'snn':
             k = 30  # 近傍数
             nn = NearestNeighbors(n_neighbors=k).fit(embedding)

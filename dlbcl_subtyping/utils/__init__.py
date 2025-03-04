@@ -1,11 +1,15 @@
 from PIL import Image
 from PIL.Image import Image as ImageType
+import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 
 from .cli import BaseMLCLI, BaseMLArgs
+
+
+
 
 def hover_images_on_scatters(scatters, imagess, ax=None, offset=(150, 30)):
     if ax is None:
@@ -62,3 +66,5 @@ def hover_images_on_scatters(scatters, imagess, ax=None, offset=(150, 30)):
             return
 
     fig.canvas.mpl_connect('motion_notify_event', hover)
+
+

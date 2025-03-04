@@ -19,10 +19,37 @@ import hdbscan
 import torch
 import timm
 
-from .utils.cli import BaseMLCLI, BaseMLArgs
+from .utils import BaseMLCLI, BaseMLArgs
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 
+
+
+# def is_white_patch(patch, white_threshold=200, white_ratio=0.7):
+#     gray_patch = np.mean(patch, axis=-1)
+#     white_pixels = np.sum(gray_patch > white_threshold)
+#     total_pixels = patch.shape[0] * patch.shape[1]
+#     return (white_pixels / total_pixels) > white_ratio
+
+
+def is_white_patch_std_sat(patch, rgb_std_threshold=5.0, sat_threshold=10, white_ratio=0.7, verbose=False):
+    # white: RGB std < 5.0 and Sat(HSV) < 15
+    rgb_std_pixels = np.std(patch, axis=2) < rgb_std_threshold
+    patch_hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
+    sat_pixels = patch_hsv[:, :, 1] < sat_threshold
+    white_pixels = np.sum(rgb_std_pixels | sat_pixels)
+    total_pixels = patch.shape[0] * patch.shape[1]
+    white_ratio_calculated = white_pixels / total_pixels
+    if verbose:
+        print('whi' if white_ratio_calculated > white_ratio else 'use',
+              'and{:.3f} or{:.3f} std{:.3f} sat{:.4f}'.format(
+                    np.sum(rgb_std_pixels & sat_pixels)/total_pixels,
+                    np.sum(rgb_std_pixels | sat_pixels)/total_pixels,
+                    np.sum(rgb_std_pixels)/total_pixels,
+                    np.sum(sat_pixels)/total_pixels
+                ),
+            )
+    return white_ratio_calculated > white_ratio
 
 class CLI(BaseMLCLI):
     class CommonArgs(BaseMLArgs):
@@ -197,12 +224,16 @@ class CLI(BaseMLCLI):
 
     def run_image_hist(self, a):
         img = cv2.imread(a.input_path)
+
         # BGRからRGBとHSVに変換
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
 
-        # 8つのサブプロットを作成 (4x2)
-        fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+        print(is_white_patch_std_sat(rgb, verbose=True))
+
+        # 8つのサブプロットを作成 (4x3)
+        fig, axes = plt.subplots(3, 4, figsize=(20, 10))
 
         # RGBヒストグラム
         for i, color in enumerate(['r', 'g', 'b']):
@@ -256,7 +287,7 @@ class CLI(BaseMLCLI):
 
         # 表示幅を調整
         max_std_value = np.max(std_gray)
-        histogram_range = [0, 20]
+        histogram_range = [0, 50]
 
         # ヒストグラムを計算
         std_hist = cv2.calcHist([std_gray], [0], None, [max_std_value+1], histogram_range)
@@ -266,6 +297,34 @@ class CLI(BaseMLCLI):
         axes[1, 3].set_xlim(histogram_range)
         axes[1, 3].set_title(f'RGB Std Histogram (Range: 0-{max_std_value})')
         axes[1, 3].grid(True)
+
+
+        # LABヒストグラム (3段目)
+        lab_colors = ['k', 'g', 'b']  # プロット用の色（L:黒, a:緑, b:青）
+        lab_titles = ['Lightness', 'a (green-red)', 'b (blue-yellow)']
+        lab_ranges = [[0, 256], [0, 256], [0, 256]]  # L: 0-255, a: 0-255, b: 0-255
+
+        for i in range(3):
+            # ヒストグラムを計算
+            hist = cv2.calcHist([lab], [i], None, [256], [0, 256])
+            # プロット
+            axes[2, i].plot(hist, color=lab_colors[i])
+            axes[2, i].set_xlim([0, 256])
+            axes[2, i].set_xticks(range(0, 257, 10))
+            axes[2, i].set_title(f'LAB {lab_titles[i]} Histogram')
+            axes[2, i].grid(True)
+
+        # LAB平均値ヒストグラム
+        mean_lab = cv2.blur(lab, (kernel_size, kernel_size))
+        # 各ピクセルでLABの平均を計算
+        lab_mean = np.mean(mean_lab, axis=2).astype(np.uint8)
+        # ヒストグラムを計算
+        lab_mean_hist = cv2.calcHist([lab_mean], [0], None, [256], [0, 256])
+        # ヒストグラムをプロット
+        axes[2, 3].plot(lab_mean_hist, color='purple')
+        axes[2, 3].set_xlim([0, 256])
+        axes[2, 3].set_title('LAB Mean Histogram')
+        axes[2, 3].grid(True)
 
         plt.tight_layout()
         plt.show()
