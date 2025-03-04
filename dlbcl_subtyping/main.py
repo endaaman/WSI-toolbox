@@ -15,6 +15,7 @@ import umap
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
+from sklearn.decomposition import PCA
 import networkx as nx
 import leidenalg as la
 import igraph as ig
@@ -304,6 +305,7 @@ class CLI(BaseMLCLI):
     class ClusterArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         method: str = Field('HDBSCAN', s='-M')
+        use_pca: bool = False
         save: bool = False
         fig_path: str = ''
         noshow: bool = False
@@ -325,13 +327,21 @@ class CLI(BaseMLCLI):
         embedding = reducer.fit_transform(scaled_features)
         print('UMAP done')
 
+        if a.use_pca:
+            print('using PCA')
+            pca = PCA(n_components=100)
+            target_features = pca.fit_transform(scaled_features)
+        else:
+            print('using coordinates')
+            target_features = embedding
+
         eps = 0.2
         if a.method.lower() == 'dbscan':
             m = DBSCAN(
                 eps=eps,
                 min_samples=5
             )
-            clusters = m.fit_predict(embedding)
+            clusters = m.fit_predict(target_features)
         elif a.method.lower() == 'hdbscan':
             m = hdbscan.HDBSCAN(
                 min_cluster_size=5,
@@ -339,12 +349,12 @@ class CLI(BaseMLCLI):
                 cluster_selection_epsilon=eps,
                 metric='euclidean'
             )
-            clusters = m.fit_predict(embedding)
+            clusters = m.fit_predict(target_features)
             # clusters = m.fit_predict(scaled_features)
         elif a.method.lower() == 'snn':
-            k = 30  # 近傍数
-            nn = NearestNeighbors(n_neighbors=k).fit(embedding)
-            distances, indices = nn.kneighbors(embedding)
+            k = 50
+            nn = NearestNeighbors(n_neighbors=k).fit(target_features)
+            distances, indices = nn.kneighbors(target_features)
             n_samples = embedding.shape[0]
             snn_graph = np.zeros((n_samples, n_samples))
 
@@ -366,9 +376,9 @@ class CLI(BaseMLCLI):
             distance_matrix = 1 - snn_graph
             clusters = m.fit_predict(distance_matrix)
         elif a.method.lower() == 'leiden':
-            k = 50  # Number of neighbors
-            nn = NearestNeighbors(n_neighbors=k).fit(embedding)
-            distances, indices = nn.kneighbors(embedding)
+            k = 50
+            nn = NearestNeighbors(n_neighbors=k).fit(target_features)
+            distances, indices = nn.kneighbors(target_features)
 
             G = nx.Graph()
             n_samples = embedding.shape[0]
