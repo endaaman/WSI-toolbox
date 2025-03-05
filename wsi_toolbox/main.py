@@ -48,15 +48,14 @@ def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
     return white_ratio_calculated > white_ratio
 
 
-def find_optimal_components(scaled_features, max_components=300):
+def find_optimal_components(features, threshold=0.95):
     pca = PCA()
-    pca.fit(scaled_features)
+    pca.fit(features)
     explained_variance = pca.explained_variance_ratio_
     # 累積寄与率が95%を超える次元数を選択する例
     cumulative_variance = np.cumsum(explained_variance)
-    optimal_n = np.argmax(cumulative_variance >= 0.95) + 1
-    # 最大値で制限
-    return min(optimal_n, max_components, len(scaled_features) - 1)
+    optimal_n = np.argmax(cumulative_variance >= threshold) + 1
+    return min(optimal_n, len(features) - 1)
 
 
 def get_platform_font():
@@ -190,8 +189,8 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         size: int = 64
-        without_cluster: bool = Field(False, s='-N')
-        show: bool = False
+        cluster_target: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', ''], l='--cluster', s='-C')
+        open: bool = False
 
     def run_preview(self, a):
         S = a.size
@@ -209,10 +208,10 @@ class CLI(BaseMLCLI):
             patch_count = f['metadata/patch_count'][()]
             patch_size = f['metadata/patch_size'][()]
 
-            show_clusters = not a.without_cluster and 'clusters' in f
+            show_clusters = a.cluster_target and f'{a.cluster_target}/clusters' in f
             print('show_clusters', show_clusters)
             if show_clusters:
-                clusters = f['clusters'][:]
+                clusters = f[f'{a.cluster_target}/clusters'][:]
             else:
                 clusters = []
 
@@ -250,7 +249,7 @@ class CLI(BaseMLCLI):
             canvas.save(output_path)
             print(f'wrote {output_path}')
 
-        if a.show:
+        if a.open:
             os.system(f'xdg-open {output_path}')
 
     class ProcessPatchesArgs(CommonArgs):
@@ -357,7 +356,7 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         models: list[str] = Field(['gigapath'], choices=['uni', 'gigapath'])
         method: str = Field('leiden', s='-M')
-        save: bool = False
+        nosave: bool = False
         noshow: bool = False
 
     def run_cluster(self, a):
@@ -373,6 +372,7 @@ class CLI(BaseMLCLI):
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
             feature_arrays = []
+            print(f.keys())
             for model in a.models:
                 path = f'{model}/features'
                 if path in f:
@@ -472,13 +472,27 @@ class CLI(BaseMLCLI):
                 size = 7
             plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
 
+
+        for cluster_id in cluster_ids:
+            if cluster_id < 0:
+                continue
+            cluster_points = embedding[clusters == cluster_id]
+            if len(cluster_points) < 1:
+                continue
+            centroid_x = np.mean(cluster_points[:, 0])
+            centroid_y = np.mean(cluster_points[:, 1])
+            ax.text(centroid_x, centroid_y, str(cluster_id),
+                   fontsize=12, fontweight='bold',
+                   ha='center', va='center',
+                   bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+
         plt.title(f'UMAP + {a.method} Clustering')
         plt.xlabel('UMAP Dimension 1')
         plt.ylabel('UMAP Dimension 2')
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
 
-        if a.save:
+        if not a.nosave:
             with h5py.File(a.input_path, 'a') as f:
                 path = f'{name}/clusters'
                 if path in f:
@@ -495,10 +509,10 @@ class CLI(BaseMLCLI):
             plt.show()
 
 
-    class AlignFeaturesArgs(CommonArgs):
+    class AlignKeysArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
 
-    def run_align_features(self, a):
+    def run_align_keys(self, a):
         with h5py.File(a.input_path, 'a') as f:
             if 'features' in f:
                 features = f['features'][:]
@@ -506,7 +520,7 @@ class CLI(BaseMLCLI):
                     print('"gigapath/features" already exists')
                 else:
                     f.create_dataset('gigapath/features', data=features)
-                    print('"gigapath/features" was add')
+                    print('"gigapath/features" was added')
                 del f['features']
                 print('"features" has been deleted')
             else:
