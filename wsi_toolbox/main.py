@@ -82,7 +82,6 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field(..., l='--out', s='-o')
         patch_size: int = 256
-        tile_size: int = 8192
         overwrite: bool = False
 
     def run_wsi2h5(self, a):
@@ -189,7 +188,7 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         size: int = 64
-        cluster_target: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', ''], l='--cluster', s='-C')
+        cluster_target: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'], l='--cluster', s='-C')
         open: bool = False
 
     def run_preview(self, a):
@@ -208,7 +207,7 @@ class CLI(BaseMLCLI):
             patch_count = f['metadata/patch_count'][()]
             patch_size = f['metadata/patch_size'][()]
 
-            show_clusters = a.cluster_target and f'{a.cluster_target}/clusters' in f
+            show_clusters = a.cluster_target != 'none' and f'{a.cluster_target}/clusters' in f
             print('show_clusters', show_clusters)
             if show_clusters:
                 clusters = f[f'{a.cluster_target}/clusters'][:]
