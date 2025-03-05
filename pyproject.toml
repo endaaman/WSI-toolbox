@@ -1,5 +1,5 @@
 [project]
-name = "DLBCL-subtyping"
+name = "WSI-toolbox"
 version = "0.1.0"
 description = ""
 readme = "README.md"
@@ -57,4 +57,4 @@ requires-dist = ["torch", "einops"]
 
 
 [tool.taskipy.tasks]
-main = "python -m dlbcl_subtyping.main"
+main = "python -m wsi_toolbox.main"

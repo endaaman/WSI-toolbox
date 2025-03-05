@@ -1,4 +1,4 @@
-# DLBCL subtyping
+# WSI Toolbox
 
 
 ## Python environment management
@@ -31,7 +31,7 @@ $ sourve .venv/bin/activate
 WSIファイルをパッチ分割してHDF5に固める
 
 ```
-$ python -m dlbcl_subtyping.main wsi2h5 -i data/DLBCL-Morph/13952_0.svs -o out/d256.h5 --patch-size 256
+$ python -m wsi_toolbox.main wsi2h5 -i data/DLBCL-Morph/13952_0.svs -o out/d256.h5 --patch-size 256
 ```
 
 指定したパッチサイズになるように0.4〜0.5mppでパッチ分割し、HDFに座標とともに保存。メタデータにいろいろ保存しておく。
@@ -63,7 +63,7 @@ $ python -m dlbcl_subtyping.main wsi2h5 -i data/DLBCL-Morph/13952_0.svs -o out/d
 GigaPathで各パッチの特徴量を抽出
 
 ```
-$ python -m dlbcl_subtyping.main process-tiles -i out/d256.h5 -B 256
+$ python -m wsi_toolbox.main process-tiles -i out/d256.h5 -B 256
 ```
 
 `h5`ファイルの`features` に書き込まれる。
@@ -73,7 +73,7 @@ WSIをまとめてHDFに変換
 
 ```
 
-$ ls data/DLBCL-Morph/*.svs | xargs -n1 basename | awk -F_ '{print $1" "$0}' | xargs -I{} sh -c 'set -- {}; pueue add python -m dlbcl_subtyping.main wsi2h5 --in "data/DLBCL-Morph/$2" --out "out/dataset/$1/${2%.svs}_256.h5" --patch-size 256'
+$ ls data/DLBCL-Morph/*.svs | xargs -n1 basename | awk -F_ '{print $1" "$0}' | xargs -I{} sh -c 'set -- {}; pueue add python -m wsi_toolbox.main wsi2h5 --in "data/DLBCL-Morph/$2" --out "out/dataset/$1/${2%.svs}_256.h5" --patch-size 256'
 ```
 
 `data/DLBCL-Morph/13952_0.svs` のように保存されているのを `out/dataset/13952/13952_0.h5` というような形式で保存する。
@@ -83,7 +83,7 @@ $ ls data/DLBCL-Morph/*.svs | xargs -n1 basename | awk -F_ '{print $1" "$0}' | x
 UMAPで次元削減し、HDBSCANでクラスタリング
 
 ```
-$ python -m dlbcl_subtyping.main cluster -i out/d256.h5 --save
+$ python -m wsi_toolbox.main cluster -i out/d256.h5 --save
 ```
 
 プロットを見つつ `--save` で `clusters` にクラスタ番号を保存
@@ -94,7 +94,7 @@ $ python -m dlbcl_subtyping.main cluster -i out/d256.h5 --save
 白色でスキップされたパッチや、パッチのクラスタを確認
 
 ```
-$ python -m dlbcl_subtyping.main preview -i out/d256.h5 -C --size 64
+$ python -m wsi_toolbox.main preview -i out/d256.h5 -C --size 64
 ```
 
 `-C` でクラスタの結果を反映する。 `--size` は各パッチを結合するときの解像度。

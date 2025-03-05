@@ -159,82 +159,6 @@ wheels = [
 ]
 
 [[package]]
-name = "dlbcl-subtyping"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "einops" },
-    { name = "fairscale" },
-    { name = "gigapath" },
-    { name = "h5py" },
-    { name = "hdbscan" },
-    { name = "leidenalg" },
-    { name = "matplotlib" },
-    { name = "networkx" },
-    { name = "numpy" },
-    { name = "opencv-python-headless" },
-    { name = "openpyxl" },
-    { name = "openslide-python" },
-    { name = "pandas" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "pyqt6" },
-    { name = "python-igraph" },
-    { name = "scikit-learn" },
-    { name = "seahorse" },
-    { name = "taskipy" },
-    { name = "timm" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "umap-learn" },
-]
-
-[package.optional-dependencies]
-build = [
-    { name = "packaging" },
-    { name = "setuptools" },
-    { name = "torch" },
-    { name = "wheel" },
-]
-compile = [
-    { name = "flash-attn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "einops", specifier = ">=0.8.1" },
-    { name = "fairscale", specifier = ">=0.4.13" },
-    { name = "flash-attn", marker = "extra == 'compile'" },
-    { name = "gigapath", git = "https://github.com/prov-gigapath/prov-gigapath.git?rev=5d77be0" },
-    { name = "h5py", specifier = ">=3.13.0" },
-    { name = "hdbscan", specifier = ">=0.8.40" },
-    { name = "leidenalg", specifier = ">=0.10.2" },
-    { name = "matplotlib", specifier = ">=3.9.4" },
-    { name = "networkx", specifier = ">=3.3" },
-    { name = "numpy", specifier = "<2" },
-    { name = "opencv-python-headless", specifier = ">=4.11.0.86" },
-    { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "openslide-python", specifier = ">=1.4.1" },
-    { name = "packaging", marker = "extra == 'build'" },
-    { name = "pandas", specifier = ">=2.2.3" },
-    { name = "pillow", specifier = ">=11.0.0" },
-    { name = "pydantic", specifier = ">=2.10.6" },
-    { name = "pyqt6", specifier = ">=6.8.1" },
-    { name = "python-igraph", specifier = ">=0.11.8" },
-    { name = "scikit-learn", specifier = ">=1.6.1" },
-    { name = "seahorse", specifier = ">=1.1.5" },
-    { name = "setuptools", marker = "extra == 'build'" },
-    { name = "taskipy", specifier = ">=1.14.1" },
-    { name = "timm", specifier = "==0.9.16" },
-    { name = "torch", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu121" },
-    { name = "torch", marker = "extra == 'build'", index = "https://download.pytorch.org/whl/cu121" },
-    { name = "torchvision", specifier = "==0.20.1" },
-    { name = "umap-learn", specifier = "==0.5.7" },
-    { name = "wheel", marker = "extra == 'build'" },
-]
-provides-extras = ["build", "compile"]
-
-[[package]]
 name = "einops"
 version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1384,6 +1308,82 @@ sdist = { url = "https://files.pythonhosted.org/packages/b3/8f/705086c9d734d3b66
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/07/c6fe3ad3e685340704d314d765b7912993bcb8dc198f0e7a89382d37974b/win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390", size = 4083 },
 ]
+
+[[package]]
+name = "wsi-toolbox"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "einops" },
+    { name = "fairscale" },
+    { name = "gigapath" },
+    { name = "h5py" },
+    { name = "hdbscan" },
+    { name = "leidenalg" },
+    { name = "matplotlib" },
+    { name = "networkx" },
+    { name = "numpy" },
+    { name = "opencv-python-headless" },
+    { name = "openpyxl" },
+    { name = "openslide-python" },
+    { name = "pandas" },
+    { name = "pillow" },
+    { name = "pydantic" },
+    { name = "pyqt6" },
+    { name = "python-igraph" },
+    { name = "scikit-learn" },
+    { name = "seahorse" },
+    { name = "taskipy" },
+    { name = "timm" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "umap-learn" },
+]
+
+[package.optional-dependencies]
+build = [
+    { name = "packaging" },
+    { name = "setuptools" },
+    { name = "torch" },
+    { name = "wheel" },
+]
+compile = [
+    { name = "flash-attn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "einops", specifier = ">=0.8.1" },
+    { name = "fairscale", specifier = ">=0.4.13" },
+    { name = "flash-attn", marker = "extra == 'compile'" },
+    { name = "gigapath", git = "https://github.com/prov-gigapath/prov-gigapath.git?rev=5d77be0" },
+    { name = "h5py", specifier = ">=3.13.0" },
+    { name = "hdbscan", specifier = ">=0.8.40" },
+    { name = "leidenalg", specifier = ">=0.10.2" },
+    { name = "matplotlib", specifier = ">=3.9.4" },
+    { name = "networkx", specifier = ">=3.3" },
+    { name = "numpy", specifier = "<2" },
+    { name = "opencv-python-headless", specifier = ">=4.11.0.86" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
+    { name = "openslide-python", specifier = ">=1.4.1" },
+    { name = "packaging", marker = "extra == 'build'" },
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pillow", specifier = ">=11.0.0" },
+    { name = "pydantic", specifier = ">=2.10.6" },
+    { name = "pyqt6", specifier = ">=6.8.1" },
+    { name = "python-igraph", specifier = ">=0.11.8" },
+    { name = "scikit-learn", specifier = ">=1.6.1" },
+    { name = "seahorse", specifier = ">=1.1.5" },
+    { name = "setuptools", marker = "extra == 'build'" },
+    { name = "taskipy", specifier = ">=1.14.1" },
+    { name = "timm", specifier = "==0.9.16" },
+    { name = "torch", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu121" },
+    { name = "torch", marker = "extra == 'build'", index = "https://download.pytorch.org/whl/cu121" },
+    { name = "torchvision", specifier = "==0.20.1" },
+    { name = "umap-learn", specifier = "==0.5.7" },
+    { name = "wheel", marker = "extra == 'build'" },
+]
+provides-extras = ["build", "compile"]
 
 [[package]]
 name = "wsproto"
