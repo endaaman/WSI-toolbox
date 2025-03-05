@@ -337,39 +337,65 @@ class CLI(BaseMLCLI):
     def run_pca_dim(self, a):
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
-            if 'gigapath' in a.models:
-                if 'gigapath/features' in f:
-                    features0 = f['gigapath/features'][:]
+            feature_arrays = []
+            for model in a.models:
+                path = f'{model}/features'
+                if path in f:
+                    feature_arrays.append(f[path][:])
                 else:
-                    features0 = f['features'][:]
-            else:
-                features0 = np.zeros([patch_count, 0]) # dummy
+                    raise RuntimeError(f'"{path}" does not exist. Do `process-patches` first')
+            features = np.concatenate(feature_arrays, axis=1)
 
-            if 'uni' in a.models:
-                features1 = f['uni/features'][:]
-            else:
-                features1 = np.zeros([patch_count, 0]) # dummy
-
-            features = np.concatenate([features0, features1], axis=1)
-
+        # Run PCA
         pca = PCA().fit(features)
+        explained_variance = pca.explained_variance_ratio_
 
-        # 累積説明分散プロット
-        plt.figure(figsize=(10, 6))
-        plt.plot(np.cumsum(pca.explained_variance_ratio_))
+        # Cumulative explained variance plot
+        plt.figure(figsize=(12, 8))
+        plt.subplot(2, 1, 1)
+        plt.plot(np.cumsum(explained_variance))
         plt.xlabel('Number of Dimensions')
         plt.ylabel('Cumulative Explained Variance')
         plt.grid(True)
-        plt.axhline(y=0.9, color='r', linestyle='-')  # 90%ラインを表示
-        plt.axhline(y=0.95, color='g', linestyle='-')  # 95%ラインを表示
+        plt.axhline(y=0.9, color='r', linestyle='-', label='90%')
+        plt.axhline(y=0.95, color='g', linestyle='-', label='95%')
+        plt.legend()
 
-        # 90%と95%の説明分散を達成する次元数を表示
-        dim_90 = np.argmax(np.cumsum(pca.explained_variance_ratio_) >= 0.9) + 1
-        dim_95 = np.argmax(np.cumsum(pca.explained_variance_ratio_) >= 0.95) + 1
-        print(f"90%の説明分散を達成する次元数: {dim_90}")
-        print(f"95%の説明分散を達成する次元数: {dim_95}")
+        # Calculate dimensions needed for 90% and 95% explained variance
+        dim_90 = np.argmax(np.cumsum(explained_variance) >= 0.9) + 1
+        dim_95 = np.argmax(np.cumsum(explained_variance) >= 0.95) + 1
+        plt.title(f"90% Explained Variance: {dim_90} dims, 95% Explained Variance: {dim_95} dims")
 
+        # Scree plot for Elbow method
+        plt.subplot(2, 1, 2)
+        plt.plot(explained_variance, 'o-')
+        plt.xlabel('Principal Component')
+        plt.ylabel('Explained Variance Ratio')
+        plt.grid(True)
+        plt.title('Scree Plot (Elbow Method)')
+
+        # Automatically detect elbow point
+        # Calculate first derivative
+        diffs = np.diff(explained_variance)
+        # Calculate second derivative
+        diffs2 = np.diff(diffs)
+
+        # Find index where second derivative is maximum (+2 to correct for dimension reduction from derivatives)
+        elbow_idx = np.argmax(np.abs(diffs2)) + 2
+
+        # Display elbow point on plot
+        plt.axvline(x=elbow_idx, color='r', linestyle='--')
+        plt.text(elbow_idx + 0.5, explained_variance[elbow_idx],
+                 f'Elbow Point: {elbow_idx}', color='red')
+
+        print(f"Dimensions needed for 90% explained variance: {dim_90}")
+        print(f"Dimensions needed for 95% explained variance: {dim_95}")
+        print(f"Optimal dimensions estimated by Elbow method: {elbow_idx}")
+
+        plt.tight_layout()
         plt.show()
+
+        print(elbow_idx, dim_90, dim_95)
 
 if __name__ == '__main__':
     cli = CLI()
