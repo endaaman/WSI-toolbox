@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, colors as mcolors
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox, TextArea, VPacker
-import seahorse as sns
+import seaborn as sns
 import h5py
 import umap
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
@@ -34,6 +34,9 @@ from .utils import BaseMLCLI, BaseMLArgs, hover_images_on_scatters
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
 
 
 def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
@@ -70,6 +73,18 @@ def get_platform_font():
         # font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf' # TODO: propagation
         font_path = '/usr/share/fonts/TTF/DejaVuSans.ttf'
     return font_path
+
+
+def create_frame(size, color, text, font):
+    frame = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(frame)
+    draw.rectangle((0, 0, size, size), outline=color, width=4)
+    text_color = 'white' if mcolors.rgb_to_hsv(mcolors.hex2color(color))[2]<0.9 else 'black'
+    bbox = np.array(draw.textbbox((0, 0), text, font=font))
+    w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+    draw.rectangle((4, 4, bbox[2]+4, bbox[3]+4), fill=color)
+    draw.text((1, 1), text, font=font, fill=text_color)
+    return frame
 
 
 class CLI(BaseMLCLI):
@@ -188,50 +203,42 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         size: int = 64
-        cluster_target: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'], l='--cluster', s='-C')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
         open: bool = False
 
     def run_preview(self, a):
         S = a.size
-
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
             output_path = f'{base}_thumb.jpg'
 
         cmap = plt.get_cmap('tab20')
-
         with h5py.File(a.input_path, 'r') as f:
             cols = f['metadata/cols'][()]
             rows = f['metadata/rows'][()]
             patch_count = f['metadata/patch_count'][()]
             patch_size = f['metadata/patch_size'][()]
 
-            show_clusters = a.cluster_target != 'none' and f'{a.cluster_target}/clusters' in f
-            print('show_clusters', show_clusters)
-            if show_clusters:
-                clusters = f[f'{a.cluster_target}/clusters'][:]
-            else:
-                clusters = []
+            show_clusters = False
+            clusters = []
+            if a.model != 'none':
+                if f'{a.model}/clusters' in f:
+                    show_clusters = True
+                    clusters = f[f'{a.model}/clusters'][:]
+                    print('loaded cluster data', clusters.shape)
+                else:
+                    print(f'"{a.model}/clusters" was not found in h5 data.')
 
             frames = {}
             if show_clusters:
                 font = ImageFont.truetype(font=get_platform_font(), size=16)
                 for cluster in np.unique(clusters).tolist() + [-1]:
-                    frame = Image.new('RGBA', (S, S), (0, 0, 0, 0))
                     if cluster < 0:
                         color = '#111'
                     else:
                         color = mcolors.rgb2hex(cmap(cluster)[:3])
-                    draw = ImageDraw.Draw(frame)
-                    draw.rectangle((0, 0, S, S), outline=color, width=4)
-                    text = f'{cluster}'
-                    text_color = 'white' if mcolors.rgb_to_hsv(mcolors.hex2color(color))[2]<0.9 else 'black'
-                    bbox = np.array(draw.textbbox((0, 0), text, font=font))
-                    w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-                    draw.rectangle((4, 4, bbox[2]+4, bbox[3]+4), fill=color)
-                    draw.text((1, 1), text, font=font, fill=text_color)
-                    frames[cluster] = frame
+                    frames[cluster] = create_frame(S, color, f'{cluster}', font)
 
             canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
             for i in tqdm(range(patch_count)):
@@ -250,6 +257,55 @@ class CLI(BaseMLCLI):
 
         if a.open:
             os.system(f'xdg-open {output_path}')
+
+
+    class PreviewScoresArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field('', l='--out', s='-o')
+        size: int = 64
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
+        open: bool = False
+
+    def run_preview_scores(self, a):
+        S = a.size
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            output_path = f'{base}_scores.jpg'
+
+        cmap = plt.get_cmap('viridis')
+        font = ImageFont.truetype(font=get_platform_font(), size=16)
+
+        with h5py.File(a.input_path, 'r') as f:
+            cols = f['metadata/cols'][()]
+            rows = f['metadata/rows'][()]
+            patch_count = f['metadata/patch_count'][()]
+            patch_size = f['metadata/patch_size'][()]
+            coordinates = f['coordinates'][()]
+            scores = f[f'{a.model}/scores'][()]
+
+            print('Filtered scores:', scores[scores > 0].shape)
+
+            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
+            for i in tqdm(range(patch_count)):
+                coord = coordinates[i]
+                x, y = coord//patch_size*S
+                patch = f['patches'][i]
+                patch = Image.fromarray(patch)
+                patch = patch.resize((S, S))
+                score = scores[i]
+                if score > 0:
+                    color = mcolors.rgb2hex(cmap(score)[:3])
+                    frame = create_frame(S, color, f'{score:.3f}', font)
+                    patch.paste(frame, (0, 0), frame)
+                canvas.paste(patch, (x, y, x+S, y+S))
+
+            canvas.save(output_path)
+            print(f'wrote {output_path}')
+
+        if a.open:
+            os.system(f'xdg-open {output_path}')
+
 
     class ProcessPatchesArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
@@ -483,7 +539,7 @@ class CLI(BaseMLCLI):
             ax.text(centroid_x, centroid_y, str(cluster_id),
                    fontsize=12, fontweight='bold',
                    ha='center', va='center',
-                   bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+                   bbox=dict(facecolor='white', alpha=0.1, edgecolor='none'))
 
         plt.title(f'UMAP + {a.method} Clustering')
         plt.xlabel('UMAP Dimension 1')
@@ -506,6 +562,69 @@ class CLI(BaseMLCLI):
 
         if not a.noshow:
             plt.show()
+
+
+    class ClusterScoresArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        targets: list[int] = Field(..., s='-T')
+        model: str = Field('gigapath', l='--cluster', s='-C', choice=['gigapath', 'uni', 'unified', 'none'])
+        scaler: str = Field('minmax', choices=['std', 'minmax'])
+
+    def run_cluster_scores(self, a):
+        with h5py.File(a.input_path, 'r') as f:
+            patch_count = f['metadata/patch_count'][()]
+            clusters = f[f'{a.model}/clusters'][:]
+            mask = np.isin(clusters, a.targets)
+            masked_clusters = clusters[mask]
+            masked_features = f[f'{a.model}/features'][mask]
+
+        pca = PCA(n_components=1)
+        values = pca.fit_transform(masked_features)
+
+        if a.scaler == 'minmax':
+            scaler = MinMaxScaler()
+            values = scaler.fit_transform(values)
+        elif a.scaler == 'std':
+            scaler = StandardScaler()
+            values = scaler.fit_transform(values)
+            values = sigmoid(values)
+        else:
+            raise ValueError('Invalid scaler:', a.scaler)
+
+        data = []
+        labels = []
+
+        for target in a.targets:
+            cluster_values = values[masked_clusters == target].flatten()
+            data.append(cluster_values)
+            labels.append(f'Cluster {target}')
+
+        plt.figure(figsize=(12, 8))
+        sns.set_style('whitegrid')
+        ax = plt.subplot(111)
+        sns.violinplot(data=data, ax=ax, inner='box', cut=0, zorder=1, alpha=0.5)  # cut=0で分布全体を表示
+
+        for i, d in enumerate(data):
+            x = np.random.normal(i, 0.05, size=len(d))
+            ax.scatter(x, d, alpha=.8, s=5, color=f'C{i}', zorder=2)
+
+        ax.set_xticks(np.arange(0, len(labels)))
+        ax.set_xticklabels(labels)
+        ax.set_ylabel('PCA Values')
+        ax.set_title('Distribution of PCA Values by Cluster')
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.show()
+
+        with h5py.File(a.input_path, 'a') as f:
+            path = f'{a.model}/scores'
+            if path in f:
+                del f[path]
+                print(f'Deleted {path}')
+            vv = np.full(patch_count, -1, dtype=values.dtype)
+            vv[mask] = values[:, 0]
+            f[path] = vv
+            print(f'Wrote {path} in {a.input_path}')
 
 
     class AlignKeysArgs(CommonArgs):
