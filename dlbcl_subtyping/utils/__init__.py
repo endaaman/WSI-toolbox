@@ -11,6 +11,12 @@ from .cli import BaseMLCLI, BaseMLArgs
 
 
 
+def yes_no_prompt(question):
+    print(f"{question} [Y/n]: ", end="")
+    response = input().lower()
+    return response == "" or response.startswith("y")
+
+
 def hover_images_on_scatters(scatters, imagess, ax=None, offset=(150, 30)):
     if ax is None:
         ax = plt.gca()

@@ -1,4 +1,5 @@
 import os
+import sys
 import warnings
 from glob import glob
 from tqdm import tqdm
@@ -34,11 +35,6 @@ warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_f
 warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
 
-def yes_no_prompt(question):
-    print(f"{question} [Y/n]: ", end="")
-    response = input().lower()
-    return response == "" or response.startswith("y")
-
 
 def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
     # white: RGB std < 5.0
@@ -50,6 +46,31 @@ def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
     #       'std{:.3f}'.format(np.sum(rgb_std_pixels)/total_pixels)
     #      )
     return white_ratio_calculated > white_ratio
+
+
+def find_optimal_components(scaled_features, max_components=300):
+    pca = PCA()
+    pca.fit(scaled_features)
+    explained_variance = pca.explained_variance_ratio_
+    # 累積寄与率が95%を超える次元数を選択する例
+    cumulative_variance = np.cumsum(explained_variance)
+    optimal_n = np.argmax(cumulative_variance >= 0.95) + 1
+    # 最大値で制限
+    return min(optimal_n, max_components, len(scaled_features) - 1)
+
+
+def get_platform_font():
+    if sys.platform == 'win32':
+        # Windows
+        font_path = 'C:\\Windows\\Fonts\\msgothic.ttc'  # MSゴシック
+    elif sys.platform == 'darwin':
+        # macOS
+        font_path = '/System/Library/Fonts/Supplemental/Arial.ttf'
+    else:
+        # Linux
+        # font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf' # TODO: propagation
+        font_path = '/usr/share/fonts/TTF/DejaVuSans.ttf'
+    return font_path
 
 
 class CLI(BaseMLCLI):
@@ -124,13 +145,14 @@ class CLI(BaseMLCLI):
             f.create_dataset('metadata/cols', data=x_patch_count)
             f.create_dataset('metadata/rows', data=y_patch_count)
 
-            total_patches = f.create_dataset('patches',
-                                             shape=(x_patch_count*y_patch_count, S, S, 3),
-                                             dtype=np.uint8,
-                                             chunks=(1, S, S, 3),
-                                             compression='gzip',
-                                             compression_opts=9
-                                             )
+            total_patches = f.create_dataset(
+                    'patches',
+                    shape=(x_patch_count*y_patch_count, S, S, 3),
+                    dtype=np.uint8,
+                    chunks=(1, S, S, 3),
+                    compression='gzip',
+                    compression_opts=9)
+
             cursor = 0
             tq = tqdm(range(row_count))
             for row in tq:
@@ -168,7 +190,7 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         size: int = 64
-        with_cluster: bool = Field(False, s='-C')
+        without_cluster: bool = Field(False, s='-N')
         show: bool = False
 
     def run_preview(self, a):
@@ -186,13 +208,17 @@ class CLI(BaseMLCLI):
             rows = f['metadata/rows'][()]
             patch_count = f['metadata/patch_count'][()]
             patch_size = f['metadata/patch_size'][()]
-            clusters = f['clusters'][:]
 
-            # font = ImageFont.load_default()
-            font = ImageFont.truetype('/usr/share/fonts/TTF/DejaVuSans.ttf', size=16)
+            show_clusters = not a.without_cluster and 'clusters' in f
+            print('show_clusters', show_clusters)
+            if show_clusters:
+                clusters = f['clusters'][:]
+            else:
+                clusters = []
 
             frames = {}
-            if a.with_cluster:
+            if show_clusters:
+                font = ImageFont.truetype(font=get_platform_font(), size=16)
                 for cluster in np.unique(clusters).tolist() + [-1]:
                     frame = Image.new('RGBA', (S, S), (0, 0, 0, 0))
                     if cluster < 0:
@@ -216,18 +242,9 @@ class CLI(BaseMLCLI):
                 patch = f['patches'][i]
                 patch = Image.fromarray(patch)
                 patch = patch.resize((S, S))
-                if a.with_cluster:
-                    if not 'clusters' in f:
-                        raise RuntimeError('clusters data is not found')
+                if show_clusters:
                     frame = frames[clusters[i]]
                     patch.paste(frame, (0, 0), frame)
-                    # cluster = clusters[i]
-                    # draw = ImageDraw.Draw(patch)
-                    # if cluster > 0:
-                    #     color = mcolors.rgb2hex(cmap(cluster)[:3])
-                    # else:
-                    #     color = 'gray'
-                    # draw.rectangle((0, 0, S, S), outline=color, width=4)
                 canvas.paste(patch, (x, y, x+S, y+S))
 
             canvas.save(output_path)
@@ -306,8 +323,7 @@ class CLI(BaseMLCLI):
                 if not a.overwrite:
                     print('feature embeddings are already obtained.')
                     return
-
-            features = f['features'][:]
+            features = f['gigapath/features'][:]
             coords = f['coordinates'][:]
 
         features = torch.tensor(features, dtype=torch.float32)[None, ...].to(a.device)  # (1, L, D)
@@ -346,22 +362,24 @@ class CLI(BaseMLCLI):
 
     def run_cluster(self, a):
         assert len(a.models) > 0
+        name = {
+            frozenset(['uni']): 'uni',
+            frozenset(['gigapath']): 'gigapath',
+            frozenset(['uni', 'gigapath']): 'unified'
+        }.get(frozenset(a.models))
+        if not name:
+            raise ValueError('Invalid models', a.models)
+
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
-            if 'gigapath' in a.models:
-                if 'gigapath/features' in f:
-                    features0 = f['gigapath/features'][:]
+            feature_arrays = []
+            for model in a.models:
+                path = f'{model}/features'
+                if path in f:
+                    feature_arrays.append(f[path][:])
                 else:
-                    features0 = f['features'][:]
-            else:
-                features0 = np.zeros([patch_count, 0]) # dummy
-
-            if 'uni' in a.models:
-                features1 = f['uni/features'][:]
-            else:
-                features1 = np.zeros([patch_count, 0]) # dummy
-
-            features = np.concatenate([features0, features1], axis=1)
+                    raise RuntimeError(f'"{path}" does not exist. Do `process-patches` first')
+            features = np.concatenate(feature_arrays, axis=1)
 
         print('Loaded features', features.shape)
         scaler = StandardScaler()
@@ -378,18 +396,11 @@ class CLI(BaseMLCLI):
         print('UMAP done')
 
         eps = 0.2
-        if a.method.lower() == 'hdbscan':
-            target_features = embedding
-            m = hdbscan.HDBSCAN(
-                min_cluster_size=5,
-                min_samples=5,
-                cluster_selection_epsilon=eps,
-                metric='euclidean'
-            )
-            clusters = m.fit_predict(target_features)
-            # clusters = m.fit_predict(scaled_features)
-        elif a.method.lower() == 'leiden':
-            pca = PCA(n_components=300 if len(a.models)>2 else 200)
+        if a.method.lower() == 'leiden':
+            # 13954, 18839
+            n_components = find_optimal_components(scaled_features)
+            print('Optimal n_components:', n_components)
+            pca = PCA(n_components)
             target_features = pca.fit_transform(scaled_features)
 
             k = int(np.sqrt(len(target_features)))
@@ -418,8 +429,8 @@ class CLI(BaseMLCLI):
                 ig_graph,
                 la.RBConfigurationVertexPartition,
                 weights='weight',
-                resolution_parameter=1.0,
-                # resolution_parameter=0.3, # more coarse cluster
+                resolution_parameter=1.0, # maybe most adaptive
+                # resolution_parameter=0.5, # more coarse cluster
             )
 
             # Convert partition result to cluster assignments
@@ -427,6 +438,16 @@ class CLI(BaseMLCLI):
             for i, community in enumerate(partition):
                 for node in community:
                     clusters[node] = i
+
+        elif a.method.lower() == 'hdbscan':
+            target_features = embedding
+            m = hdbscan.HDBSCAN(
+                min_cluster_size=5,
+                min_samples=5,
+                cluster_selection_epsilon=eps,
+                metric='euclidean'
+            )
+            clusters = m.fit_predict(target_features)
         else:
             raise RuntimeError('Invalid medthod:', a.method)
 
@@ -434,7 +455,6 @@ class CLI(BaseMLCLI):
         n_noise = list(clusters).count(-1)
         print('n_clusters', n_clusters)
         print('n_noise', n_noise)
-
 
         fig, ax = plt.subplots(figsize=(10, 8))
         cmap = plt.get_cmap('tab20')
@@ -460,9 +480,10 @@ class CLI(BaseMLCLI):
 
         if a.save:
             with h5py.File(a.input_path, 'a') as f:
-                if 'clusters' in f:
-                    del f['clusters']
-                f.create_dataset('clusters', data=clusters)
+                path = f'{name}/clusters'
+                if path in f:
+                    del f[path]
+                f.create_dataset(path, data=clusters)
             print(f'Save clusters to {a.input_path}')
 
             base, ext = os.path.splitext(a.input_path)
@@ -473,136 +494,42 @@ class CLI(BaseMLCLI):
         if not a.noshow:
             plt.show()
 
-    class ExtractGlobalFeaturesArgs(CommonArgs):
-        noshow: bool = False
 
-    def run_extract_global_features(self, a):
-        featuress = []
-        lengths = []
-        for dir in sorted(glob('data/dataset/*')):
-            name = os.path.basename(dir)
-            for i, h5_path in enumerate(sorted(glob(f'{dir}/*.h5'))):
-                with h5py.File(h5_path, 'r') as f:
-                    features = f['features'][:]
-                    lengths.append(len(features))
-                    featuress.append(features)
+    class AlignFeaturesArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
 
-        features = np.concatenate(featuress)
+    def run_align_features(self, a):
+        with h5py.File(a.input_path, 'a') as f:
+            if 'features' in f:
+                features = f['features'][:]
+                if 'gigapath/features' in f:
+                    print('"gigapath/features" already exists')
+                else:
+                    f.create_dataset('gigapath/features', data=features)
+                    print('"gigapath/features" was add')
+                del f['features']
+                print('"features" has been deleted')
+            else:
+                if 'gigapath/features' in f:
+                    print('features OK')
+                else:
+                    print('Both "features" and "gigapath/features" do not exist')
 
-        with h5py.File('data/global_features.h5', 'w') as f:
-            f.create_dataset('global_features', data=features)
-            f.create_dataset('lengths', data=np.array(lengths))
+            if 'slide_feature' in f:
+                slide_feature = f['slide_feature'][:]
+                if 'gigapath/slide_feature' in f:
+                    print('"gigapath/slide_feature" already exists')
+                else:
+                    f.create_dataset('gigapath/slide_feature', data=slide_feature)
+                    print('"gigapath/slide_feature" was added')
 
-    def run_extract_slide_features(self, a):
-        data = []
-        features = []
-        for dir in sorted(glob('data/dataset/*')):
-            name = os.path.basename(dir)
-            for i, h5_path in enumerate(sorted(glob(f'{dir}/*.h5'))):
-                with h5py.File(h5_path, 'r') as f:
-                    features.append(f['slide_feature'][:])
-                data.append({
-                    'name': name,
-                    'order': i,
-                    'filename': os.path.basename(h5_path),
-                })
-
-        df = pd.DataFrame(data)
-        features = np.array(features)
-        print('features', features.shape)
-
-        o = 'data/slide_features.h5'
-        with h5py.File(o, 'w') as f:
-            f.create_dataset('features', data=features)
-            f.create_dataset('names', data=df['name'].values)
-            f.create_dataset('orders', data=df['order'].values)
-            f.create_dataset('filenames', data=df['filename'].values)
-        print(f'wrote {o}')
-
-
-    class GlobalClusterArgs(CommonArgs):
-        noshow: bool = False
-        n_samples: int = Field(100, s='-N')
-
-    def run_global_cluster(self, a):
-        features = []
-        images = []
-        dfs = []
-        for dir in sorted(glob('data/dataset/*')):
-            name = os.path.basename(dir)
-            for i, h5_path in enumerate(sorted(glob(f'{dir}/*.h5'))):
-                with h5py.File(h5_path, 'r') as f:
-                    patch_count = f['metadata/patch_count'][()]
-                    ii = np.random.choice(patch_count, size=a.n_samples, replace=False)
-                    ii = np.sort(ii)
-                    features.append(f['features'][ii])
-                    images.append(f['patches'][ii])
-                    df_wsi = pd.DataFrame({'index': ii})
-                df_wsi['name'] = int(os.path.basename(dir))
-                df_wsi['order'] = i
-                df_wsi['filename'] = os.path.basename(h5_path)
-                dfs.append(df_wsi)
-
-        df = pd.concat(dfs)
-        df_clinical = pd.read_excel('./data/clinical_data_cleaned.xlsx', index_col=0)
-        df = pd.merge(
-            df,
-            df_clinical,
-            left_on='name',
-            right_index=True,
-            how='left'
-        )
-
-        features = np.concatenate(features)
-        images = np.concatenate(images)
-        # images = [Image.fromarray(i) for i in images]
-
-        print('Loaded features', features.dtype, features.shape)
-        scaler = StandardScaler()
-        scaled_features = scaler.fit_transform(features)
-
-        print('UMAP fitting...')
-        reducer = umap.UMAP(
-                # n_neighbors=80,
-                # min_dist=0.3,
-                n_components=2,
-                metric='cosine',
-                min_dist=0.5,
-                spread=2.0
-                # random_state=a.seed
-            )
-        embedding = reducer.fit_transform(scaled_features)
-        print('UMAP ok')
-
-        # scatter = plt.scatter(embedding[:, 0], embedding[:, 1], s=5, c=df['LDH'].values)
-        # hover_images_on_scatters([scatter], [images])
-
-        target = 'HANS'
-
-        fig, ax = plt.subplots(figsize=(10, 8))
-        plt.scatter(embedding[:, 0], embedding[:, 1], alpha=0)
-        for (x, y), image, (_idx, row) in zip(embedding, images, df.iterrows()):
-            img = OffsetImage(image, zoom=.125)
-            value = row[target]
-
-            text = TextArea(row['name'], textprops=dict(color='#000', ha='center'))
-            vpack = VPacker(children=[text, img], align='center', pad=1)
-
-            cmap = plt.cm.viridis
-            color = '#333' if value < 0 else cmap(value)
-            bbox_props = dict(boxstyle='square,pad=0.1', edgecolor=color, linewidth=1, facecolor='none')
-
-            ab = AnnotationBbox(vpack, (x, y), frameon=True, bboxprops=bbox_props)
-            ax.add_artist(ab)
-
-        plt.title(f'UMAP')
-        plt.xlabel('UMAP Dimension 1')
-        plt.ylabel('UMAP Dimension 2')
-        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        plt.show()
-
-
+                del f['slide_feature']
+                print('"slide_feature" has been deleted')
+            else:
+                if 'gigapath/slide_feature' in f:
+                    print('slide_feature OK')
+                else:
+                    print('Both "slide_feature" and "gigapath/slide_feature" do not exist')
 
 
 if __name__ == '__main__':
