@@ -41,10 +41,6 @@ $ python -m wsi_toolbox.main wsi2h5 -i data/DLBCL-Morph/13952_0.svs -o out/13952
                             ex) [3237, 512, 512, 3] のようなテンソル
 'coordinates'             : 各パッチのピクセル単位の座標 dim:[<patch_count>, 2]
 
-'features'                : GigaPathで抽出した特等量 dim:[<patch_count>, 1536]
-
-'clusters'                : DBSCANで取得したクラスタ番号 dim:[<patch_count>]
-
 'metadata/original_mpp'   : もともとのmpp
 'metadata/original_width' : もともとの画像の幅（level=0）
 'metadata/original_height': もともとの画像の幅（level=0）
@@ -55,6 +51,15 @@ $ python -m wsi_toolbox.main wsi2h5 -i data/DLBCL-Morph/13952_0.svs -o out/13952
 'metadata/patch_count'    : パッチの総数
 'metadata/cols'           : パッチを並べたときの横方向の数
 'metadata/rows'           : パッチを並べたときの縦方向の数
+
+'gigapath/features'       : GigaPathで抽出した特等量 dim:[<patch_count>, 1536]
+'gigapath/slide_feature'  : Slide level encoderで抽出した特徴量 dim: [768]
+'gigapath/clusters'       : 上記からPCA+leidenで取得したクラスタ番号 dim:[<patch_count>]
+
+'uni/features'            : UNIで抽出した特等量 dim:[<patch_count>, 1024]
+'uni/clusters'            : 上記からPCA+leidenで取得したクラスタ番号 dim:[<patch_count>]
+
+'unified/clusters'        : GigaPathとUNIの特徴量を結合したあとPCA+leidenで取得したクラスタ番号 dim:[<patch_count>]
 ```
 
 
