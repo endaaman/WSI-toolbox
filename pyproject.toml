@@ -13,6 +13,7 @@ dependencies = [
     "gigapath",
     "h5py>=3.13.0",
     "hdbscan>=0.8.40",
+    "imagecodecs>=2024.12.30",
     "leidenalg>=0.10.2",
     "matplotlib>=3.9.4",
     "networkx>=3.3",
@@ -28,10 +29,12 @@ dependencies = [
     "scikit-learn>=1.6.1",
     "seaborn>=0.13.2",
     "taskipy>=1.14.1",
+    "tifffile>=2025.2.18",
     "timm==0.9.16",
     "torch==2.5.1",
     "torchvision==0.20.1",
     "umap-learn==0.5.7",
+    "zarr<3",
 ]
 
 [tool.uv.sources]
