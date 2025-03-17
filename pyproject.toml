@@ -62,3 +62,4 @@ requires-dist = ["torch", "einops"]
 [tool.taskipy.tasks]
 main = "python -m wsi_toolbox.main"
 server = "streamlit run wsi_toolbox/server.py"
+server2 = "streamlit run wsi_toolbox/server2.py"

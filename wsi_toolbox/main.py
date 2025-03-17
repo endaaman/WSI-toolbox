@@ -146,7 +146,7 @@ def sigmoid(x):
 
 
 def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
-    # white: RGB std < 5.0
+    # white: RGB std < 7.0
     rgb_std_pixels = np.std(patch, axis=2) < rgb_std_threshold
     white_pixels = np.sum(rgb_std_pixels)
     total_pixels = patch.shape[0] * patch.shape[1]

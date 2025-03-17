@@ -86,24 +86,21 @@ def list_files(directory):
 def main():
     st.title('WSI Analysis System')
 
-    # Sidebar for configuration
-    st.sidebar.header('Configuration')
+    # st.sidebar.header('Configuration')
 
     # Default directory (would be provided at startup in production)
     if 'current_dir' not in st.session_state:
         st.session_state.current_dir = 'data'  # Default to current directory
 
     # Allow directory navigation
-    if st.sidebar.button('↑ Parent Directory'):
+    if st.button('↑ Parent Directory'):
         previous_dir = st.session_state.current_dir
         parent_dir = str(Path(st.session_state.current_dir).parent)
         st.session_state.current_dir = parent_dir
-        st.sidebar.write(f"Previous: {previous_dir}")
-        st.sidebar.write(f"New: {parent_dir}")
         st.rerun()
 
-    st.sidebar.subheader('Current Directory')
-    st.sidebar.text(st.session_state.current_dir)
+    # st.sidebar.subheader('Current Directory')
+    # st.sidebar.text(st.session_state.current_dir)
 
     # List files in the directory
     st.write(st.session_state.current_dir)
