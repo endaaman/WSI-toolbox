@@ -28,6 +28,7 @@ dependencies = [
     "python-igraph>=0.11.8",
     "scikit-learn>=1.6.1",
     "seaborn>=0.13.2",
+    "streamlit>=1.43.2",
     "taskipy>=1.14.1",
     "tifffile>=2025.2.18",
     "timm==0.9.16",
@@ -60,3 +61,4 @@ requires-dist = ["torch", "einops"]
 
 [tool.taskipy.tasks]
 main = "python -m wsi_toolbox.main"
+server = "streamlit run wsi_toolbox/server.py"
