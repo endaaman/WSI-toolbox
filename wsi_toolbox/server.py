@@ -73,24 +73,31 @@ def list_files(directory):
                 icon = "📊"
                 file_type = "HDF5"
 
-            size_mb = os.path.getsize(item_path) / (1024 * 1024)
+            size = os.path.getsize(item_path)
+            if size > 1024*1024*1024:
+                size_str = f'{size/1024/1024/1024:.1f} GB'
+            elif size > 1024*1024:
+                size_str = f'{size/1024/1024:.1f} MB'
+            elif size > 1024:
+                size_str = f'{size/1024:.1f} KB'
+            else:
+                size_str = f'{size} bytes'
             files.append({
                 "selected": False,
                 "name": f"{icon} {item}",
                 "path": item_path,
                 "type": file_type,
-                "size_mb": f"{size_mb:.2f} MB",
+                "size": size_str,
                 "modified": time.ctime(os.path.getmtime(item_path))
             })
 
         elif os.path.isdir(item_path):
-            # ディレクトリ用アイコン
             directories.append({
                 "selected": False,
                 "name": f"📁 {item}",
                 "path": item_path,
                 "type": "Directory",
-                "size_mb": "",
+                "size": "",
                 "modified": time.ctime(os.path.getmtime(item_path))
             })
 
@@ -104,35 +111,48 @@ def get_mode_and_multi(selected_files):
         return 'Empty', False
     if len(selected_files) == 1:
         selected = selected_files[0]
-        return [selected['type'], False
+        return selected['type'], False
 
     type_set = set([f['type'] for f in selected_files])
     if len(type_set) > 1:
         return 'Mix', True
-    st.write(type_set)
-    t = list(type_set)[0]
+    t = next(iter(type_set))
     return t, True
 
 
 DEFAULT_ROOT = 'data'
 
 def main():
-    st.title('WSI Analysis System')
+    st.title('WSI AI解析システム')
 
     if 'current_dir' not in st.session_state:
         st.session_state.current_dir = DEFAULT_ROOT
 
-    if st.button('↑ Parent Directory'):
-        st.session_state.current_dir = parent_dir
-        st.rerun()
+    # デフォルトルートと現在のディレクトリの絶対パス取得
+    default_root_abs = os.path.abspath(DEFAULT_ROOT)
+    current_dir_abs = os.path.abspath(st.session_state.current_dir)
+
+    # 親ディレクトリボタン処理
+    if current_dir_abs != default_root_abs:
+        if st.button('↑ 親フォルダへ'):
+            # 親ディレクトリを取得
+            parent_dir = os.path.dirname(current_dir_abs)
+            # デフォルトルート以上に移動しないようチェック
+            if os.path.commonpath([default_root_abs]) == os.path.commonpath([default_root_abs, parent_dir]):
+                st.session_state.current_dir = parent_dir
+                st.rerun()
+    else:
+        # ルートディレクトリの場合は無効化
+        st.button('↑ 親フォルダへ', disabled=True)
+
 
     files = list_files(st.session_state.current_dir)
     files_df = pd.DataFrame(files)
 
-    st.subheader(f'File Selection')
+    st.subheader(f'ファイル選択')
 
     if len(files_df) ==  0:
-        st.warning('This directory is empty.')
+        st.warning('ファイルが選択されていません')
         return
 
     edited_df = st.data_editor(
@@ -143,65 +163,61 @@ def main():
                 width='small',
                 # help='Select files'
             ),
-            'name': 'File Name',
-            'type': 'Type',
-            'size_mb': 'Size',
+            'name': 'ファイル名',
+            'type': '種別',
+            'size': 'ファイルサイズ',
             'modified': 'Last Modified',
             'path': None,  # Hide path column
         },
         hide_index=True,
         use_container_width=True,
-        # selection_mode='single-row',
-        disabled=['name', 'type', 'size_mb', 'modified'],
-        # selection_mode='multi-row',
+        disabled=['name', 'type', 'size', 'modified'],
     )
 
     selected_files = edited_df[edited_df['selected'] == True].to_dict('records')
 
     mode, multi = get_mode_and_multi(selected_files)
     if mode == 'Empty':
-        st.write('Select files from checkboxes.')
+        st.write('チェックボックからファイルを選択してください。')
     elif mode == 'Directory':
         if multi:
-            st.warning('Multi directories are seleted.')
+            st.warning('複数フォルダが選択されました。')
         else:
-            if st.button('Move to this directory'):
-                st.session_state.current_dir = selected_files[0].path
+            if st.button('このフォルダに移動'):
+                st.session_state.current_dir = selected_files[0]['path']
                 st.rerun()
 
     elif mode == 'Other':
-        st.warning('Some selected files are not supported. Only WSI (.ndpi, .svs) and HDF5 (.h5) files can be processed.')
+        st.warning('WSI(.ndpi, .svs)ファイルもしくはHDF5ファイル(.h5)を選択しください。')
     elif mode == 'Mix':
-        st.warning('Cannot mix WSI and HDF5 files in the same operation. Please select only one type.')
-    elif mode == 'Wsi':
-        st.subheader('Processing Options')
-        st.write('WSI files selected. Available operations:')
+        st.warning('単一種類のファイルを選択してください。')
+    elif mode == 'WSI':
+        st.subheader('WSI解析オプション')
 
-        # Operation options
-        operation = st.radio(
-            'Choose operation',
-            ['Convert to h5 + Extract features', 'Convert to h5 + Extract features + Clustering'],
-            index=1
-        )
+        operations = [
+            'HDF5に変換+特徴量抽出+クラスタリング',
+            'HDF5に変換+特徴量抽出',
+            'HDF5に変換のみ',
+        ]
+        operation = st.radio('処理の内容', operations, index=0)
+        operation_index = operations.index(operation)
 
-        # For multiple files, need a cluster name
         cluster_name = None
-        if len(wsi_files) > 1 or 'Clustering' in operation:
-            cluster_name = st.text_input('Cluster name for multiple files (required)', key='wsi_cluster_name')
+        if multi and operation_index == 0:
+            cluster_name = st.text_input('複数WSIを同時にクラスタリングする場合はクラスタ名を入力してください。', key='wsi_cluster_name')
 
-        if st.button('Execute Processing', key='process_wsi'):
-            if len(wsi_files) > 1 and (not cluster_name or cluster_name.strip() == '') and 'Clustering' in operation:
-                st.error('Cluster name is required for multiple files or when performing clustering')
+        if st.button('処理を実行', key='process_wsi'):
+            if multi and (not cluster_name):
+                st.error('複数同時処理の場合はクラスタ名を入力してください。')
             else:
-                # Create a progress bar
                 progress_bar = st.progress(0)
                 status_text = st.empty()
 
                 # Process each file
                 h5_paths = []
-                for i, file in enumerate(wsi_files):
+                for i, file in enumerate(selected_files):
                     # Update progress
-                    progress = int((i / len(wsi_files)) * 100)
+                    progress = int((i / len(selected_files)) * 100)
                     progress_bar.progress(progress)
                     status_text.text(f'Processing {file["name"]}...')
 
@@ -225,11 +241,11 @@ def main():
 
         # For multiple files, need a cluster name
         cluster_name = None
-        if len(h5_files) > 0:
+        if multi:
             cluster_name = st.text_input('Cluster name (required for multiple files)', key='h5_cluster_name')
 
         if st.button('Perform Clustering', key='process_h5'):
-            if len(h5_files) > 1 and (not cluster_name or cluster_name.strip() == ''):
+            if len(selected_files) > 1 and (not cluster_name or cluster_name.strip() == ''):
                 st.error('Cluster name is required for multiple files')
             else:
                 # Create a progress bar
@@ -237,7 +253,7 @@ def main():
                 status_text = st.empty()
 
                 # Process each file
-                h5_paths = [file['path'] for file in h5_files]
+                h5_paths = [file['path'] for file in selected_files]
 
                 # Check if features exist, otherwise extract them
                 status_text.text('Checking for features...')
