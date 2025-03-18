@@ -518,11 +518,11 @@ wheels = [
 
 [[package]]
 name = "narwhals"
-version = "1.30.0"
+version = "1.31.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c4/98/be6d35e8869ab9403fa25dc3458e7af6ce36dac2873c74c7274a59b21958/narwhals-1.30.0.tar.gz", hash = "sha256:0c50cc67a5404da501302882838ec17dce51703d22cd8ad89162d6f60ea0bb19", size = 253461 }
+sdist = { url = "https://files.pythonhosted.org/packages/36/fa/c2b6a4d5dbc4af15aa58c86920d5275a9c65142318179b246685069f57da/narwhals-1.31.0.tar.gz", hash = "sha256:333472e2562343dfdd27407ec9b5114a07c81d0416794e4ac6b703dd925c6a1a", size = 253463 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/97/bde1e4cf1e0fe0d4c70f750b57d152c0ecb04bb35de7aa7950a5756a71d6/narwhals-1.30.0-py3-none-any.whl", hash = "sha256:443aa0a1abfae89bc65a6b888a7e310a03d1818bfb2ccd61c150199a5f954c17", size = 313611 },
+    { url = "https://files.pythonhosted.org/packages/f9/c0/fb39bd876ea2fd9509343d643690cd2f9715e6a77271e7c7b26f1eea70c1/narwhals-1.31.0-py3-none-any.whl", hash = "sha256:2a7b79bb5f511055c4c0142121fc0d4171ea171458e12d44dbd9c8fc6488e997", size = 313124 },
 ]
 
 [[package]]
@@ -615,7 +615,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.1.0.70"
 source = { registry = "https://download.pytorch.org/whl/cu121" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "nvidia-cublas-cu12" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cu121/nvidia_cudnn_cu12-9.1.0.70-py3-none-manylinux2014_x86_64.whl", hash = "sha256:165764f44ef8c61fcdfdfdbe769d687e06374059fbb388b6c89ecb0e28793a6f" },
@@ -642,9 +642,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.4.5.107"
 source = { registry = "https://download.pytorch.org/whl/cu121" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
-    { name = "nvidia-cusparse-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
-    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cusparse-cu12" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cu121/nvidia_cusolver_cu12-11.4.5.107-py3-none-manylinux1_x86_64.whl", hash = "sha256:8a7ec542f0412294b15072fa7dab71d31334014a69f953004ea7a118206fe0dd" },
@@ -655,7 +655,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.1.0.106"
 source = { registry = "https://download.pytorch.org/whl/cu121" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cu121/nvidia_cusparse_cu12-12.1.0.106-py3-none-manylinux1_x86_64.whl", hash = "sha256:f3b50f42cf363f86ab21f720998517a659a48131e8d538dc02f8768237bd884c" },
@@ -1213,23 +1213,23 @@ wheels = [
 
 [[package]]
 name = "threadpoolctl"
-version = "3.5.0"
+version = "3.6.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/bd/55/b5148dcbf72f5cde221f8bfe3b6a540da7aa1842f6b491ad979a6c8b84af/threadpoolctl-3.5.0.tar.gz", hash = "sha256:082433502dd922bf738de0d8bcc4fdcbf0979ff44c42bd40f5af8a282f6fa107", size = 41936 }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/4d/08c89e34946fce2aec4fbb45c9016efd5f4d7f24af8e5d93296e935631d8/threadpoolctl-3.6.0.tar.gz", hash = "sha256:8ab8b4aa3491d812b623328249fab5302a68d2d71745c8a4c719a2fcaba9f44e", size = 21274 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/2c/ffbf7a134b9ab11a67b0cf0726453cedd9c5043a4fe7a35d1cefa9a1bcfb/threadpoolctl-3.5.0-py3-none-any.whl", hash = "sha256:56c1e26c150397e58c4926da8eeee87533b1e32bef131bd4bf6a2f45f3185467", size = 18414 },
+    { url = "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl", hash = "sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb", size = 18638 },
 ]
 
 [[package]]
 name = "tifffile"
-version = "2025.2.18"
+version = "2025.3.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/de/1f/96d743b3417425f958dfed2518ad271b346a072d27b6859bb158e601bc21/tifffile-2025.2.18.tar.gz", hash = "sha256:8d731789e691b468746c1615d989bc550ac93cf753e9210865222e90a5a95d11", size = 365412 }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/c0/d6d8535063e550cb8b34f1bdda08910021ca72ef2067e14c221f6cb576fa/tifffile-2025.3.13.tar.gz", hash = "sha256:30fcc4584216937b5993d0568452b6fea8e12e61f9afb1a8e967c07c281faa06", size = 366062 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/70/6f363ab13f9903557a567a4471a28ee231b962e34af8e1dd8d1b0f17e64e/tifffile-2025.2.18-py3-none-any.whl", hash = "sha256:54b36c4d5e5b8d8920134413edfe5a7cfb1c7617bb50cddf7e2772edb7149043", size = 226358 },
+    { url = "https://files.pythonhosted.org/packages/0e/5c/de1baece8fe43b504fe795343012b26eb58484d63537ea3c793623bfc765/tifffile-2025.3.13-py3-none-any.whl", hash = "sha256:10f205b923c04678f744a6d553f6f86c639c9ba6e714f6758d81af0678ba75dc", size = 226833 },
 ]
 
 [[package]]
@@ -1353,7 +1353,7 @@ name = "triton"
 version = "3.1.0"
 source = { registry = "https://download.pytorch.org/whl/cu121" }
 dependencies = [
-    { name = "filelock", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
+    { name = "filelock" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/triton-3.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0f34f6e7885d1bf0eaaf7ba875a5f0ce6f3c13ba98f9503651c1e6dc6757ed5c" },
@@ -1451,7 +1451,7 @@ wheels = [
 [[package]]
 name = "wsi-toolbox"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "einops" },
     { name = "fairscale" },

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "WSI-toolbox"
 version = "0.1.0"
@@ -62,4 +66,6 @@ requires-dist = ["torch", "einops"]
 [tool.taskipy.tasks]
 main = "python -m wsi_toolbox.main"
 server = "streamlit run wsi_toolbox/server.py"
-server2 = "streamlit run wsi_toolbox/server2.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["wsi_toolbox"]
