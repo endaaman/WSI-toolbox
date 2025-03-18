@@ -9,7 +9,11 @@ import streamlit as st
 torch.classes.__path__ = []
 import pandas as pd
 
-from utils.progress import tqdm_or_st
+sys.path.append(str(Path(__file__).parent))
+__package__ = 'wsi_toolbox'
+
+from .utils.progress import tqdm_or_st
+from .wsi import WSIProcesser
 
 # Set page config
 st.set_page_config(
@@ -137,22 +141,23 @@ def main():
     if 'current_dir' not in st.session_state:
         st.session_state.current_dir = DEFAULT_ROOT
 
-    # デフォルトルートと現在のディレクトリの絶対パス取得
     default_root_abs = os.path.abspath(DEFAULT_ROOT)
     current_dir_abs = os.path.abspath(st.session_state.current_dir)
 
-    # 親ディレクトリボタン処理
-    if current_dir_abs != default_root_abs:
-        if st.button('↑ 親フォルダへ'):
-            # 親ディレクトリを取得
-            parent_dir = os.path.dirname(current_dir_abs)
-            # デフォルトルート以上に移動しないようチェック
-            if os.path.commonpath([default_root_abs]) == os.path.commonpath([default_root_abs, parent_dir]):
-                st.session_state.current_dir = parent_dir
-                st.rerun()
-    else:
-        # ルートディレクトリの場合は無効化
-        st.button('↑ 親フォルダへ', disabled=True)
+    cols = st.columns([0.1, 0.1])
+    with cols[0]:
+        if current_dir_abs == default_root_abs:
+            st.button('↑ 親フォルダへ', disabled=True)
+        else:
+            if st.button('↑ 親フォルダへ'):
+                parent_dir = os.path.dirname(current_dir_abs)
+                if os.path.commonpath([default_root_abs]) == os.path.commonpath([default_root_abs, parent_dir]):
+                    st.session_state.current_dir = parent_dir
+                    st.rerun()
+
+    with cols[1]:
+        if st.button('フォルダ更新'):
+            st.rerun()
 
 
     files = list_files(st.session_state.current_dir)
@@ -213,28 +218,28 @@ def main():
 
         st.write(f'{multi} {operation_index}')
 
-        cluster_name = None
-        if multi and operation_index == 0:
-            cluster_name = st.text_input('複数WSIを同時にクラスタリングする場合はクラスタ名を入力してください。', key='wsi_cluster_name')
+        # cluster_name = None
+        # if multi and operation_index == 0:
+        #     cluster_name = st.text_input('複数WSIを同時にクラスタリングする場合はクラスタ名を入力してください。', key='wsi_cluster_name')
 
         ok = True
         if st.button('処理を実行', key='process_wsi'):
-            if multi and not cluster_name:
-                st.error('複数同時処理の場合はクラスタ名を入力してください。')
+            if multi:
+                st.error('一つだけ選択してください。')
                 ok = False
-            elif multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
-                st.error('半角英数のみで入力してください。')
-                ok = False
+            # if multi and not cluster_name:
+            #     st.error('複数同時処理の場合はクラスタ名を入力してください。')
+            #     ok = False
+            # elif multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
+            #     st.error('半角英数のみで入力してください。')
+            #     ok = False
 
             if ok:
                 st.write('処理開始')
-                items = list(range(10))
-                results = []
-                for item in tqdm_or_st(items, desc="処理中...", backend="streamlit"):
-                    time.sleep(0.2)
-                    results.append(item * 2)
-
-                st.write("結果:", results)
+                input_path = selected_files[0]['path']
+                output_path = f'{os.path.splitext(input_path)[0]}.h5'
+                p = WSIProcesser(input_path)
+                p.convert_to_hdf5(output_path, patch_size=256, progress='streamlit')
 
 
     elif mode == 'HDF5':

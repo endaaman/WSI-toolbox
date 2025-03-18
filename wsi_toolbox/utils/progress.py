@@ -58,6 +58,10 @@ class StreamlitProgress:
         if self.total:
             self.progress_bar.progress(1.0)
 
+    def refresh(self):
+        """ 不要なので何もしない """
+        pass
+
     def __iter__(self):
         """イテレータとして使用できるようにする"""
         if self.iterable is None:

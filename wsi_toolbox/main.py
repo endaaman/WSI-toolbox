@@ -27,7 +27,7 @@ from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
-from .wsi import WSIOpenSlideFile, WSITiffFile
+from .wsi import WSIProcesser
 from .utils import hover_images_on_scatters
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.progress import tqdm_or_st
@@ -41,18 +41,6 @@ warnings.filterwarnings('ignore', category=FutureWarning, message="You are using
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
-
-
-def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
-    # white: RGB std < 7.0
-    rgb_std_pixels = np.std(patch, axis=2) < rgb_std_threshold
-    white_pixels = np.sum(rgb_std_pixels)
-    total_pixels = patch.shape[0] * patch.shape[1]
-    white_ratio_calculated = white_pixels / total_pixels
-    # print('whi' if white_ratio_calculated > white_ratio else 'use',
-    #       'std{:.3f}'.format(np.sum(rgb_std_pixels)/total_pixels)
-    #      )
-    return white_ratio_calculated > white_ratio
 
 
 def find_optimal_components(features, threshold=0.95):
@@ -103,7 +91,7 @@ class CLI(BaseMLCLI):
         output_path: str = Field(..., l='--out', s='-o')
         patch_size: int = 256
         overwrite: bool = False
-        engine: str = Field('openslide', choices=['openslide', 'tifffile'])
+        engine: str = Field('auto', choices=['auto', 'openslide', 'tifffile'])
 
     def run_wsi2h5(self, a):
         if os.path.exists(a.output_path):
@@ -112,104 +100,13 @@ class CLI(BaseMLCLI):
                 return
             print(f'{a.output_path} exists but overwriting it.')
 
-        wsi: WSIFile
-        if a.engine == 'openslide':
-            wsi = WSIOpenSlideFile(a.input_path)
-        elif a.engine == 'tifffile':
-            wsi = WSITiffFile(a.input_path)
-        else:
-            raise ValueError('Invalid engine', a.engine)
-
-        original_mpp = wsi.get_mpp()
-        target_level = 0
-
-        if 0.360 < original_mpp < 0.500:
-            scale = 1
-        elif original_mpp < 0.360:
-            scale = 2
-        else:
-            raise RuntimeError(f'Invalid scale: mpp={mpp:.6f}')
-        mpp = original_mpp * scale
-
-        S = a.patch_size # scaled patch size
-        T = S*scale      # actual patch size
-
-        # dimension = wsi.level_dimensions[target_level]
-        # W, H = dimension[0], dimension[1]
-        W, H = wsi.get_original_size()
-
-        x_patch_count = W//T
-        y_patch_count = H//T
-        width = (W//T)*T
-        row_count = H//T
-
-        print('Target level', target_level)
-        print(f'Original mpp: {original_mpp:.6f}')
-        print(f'Image mpp: {mpp:.6f}')
-        print('Targt resolutions', W, H)
-        print('Obtained resolutions', x_patch_count*S, y_patch_count*S)
-        print('Scale', scale)
-        print('Patch size', T)
-        print('Scaled patch size', S)
-        print('row count:', y_patch_count)
-        print('col count:', x_patch_count)
-
-        coordinates = []
-        total_patches = []
-
         d = os.path.dirname(a.output_path)
         if d:
             os.makedirs(d, exist_ok=True)
 
-        with h5py.File(a.output_path, 'w') as f:
-            f.create_dataset('metadata/original_mpp', data=original_mpp)
-            f.create_dataset('metadata/original_width', data=W)
-            f.create_dataset('metadata/original_height', data=H)
-            f.create_dataset('metadata/image_level', data=target_level)
-            f.create_dataset('metadata/mpp', data=mpp)
-            f.create_dataset('metadata/scale', data=scale)
-            f.create_dataset('metadata/patch_size', data=S)
-            f.create_dataset('metadata/cols', data=x_patch_count)
-            f.create_dataset('metadata/rows', data=y_patch_count)
+        p = WSIProcesser(a.input_path, engine=a.engine)
+        p.convert_to_hdf5(a.output_path, patch_size=a.patch_size, progress='tqdm')
 
-            total_patches = f.create_dataset(
-                    'patches',
-                    shape=(x_patch_count*y_patch_count, S, S, 3),
-                    dtype=np.uint8,
-                    chunks=(1, S, S, 3),
-                    compression='gzip',
-                    compression_opts=9)
-
-            cursor = 0
-            tq = tqdm(range(row_count))
-            for row in tq:
-                image = wsi.read_region((0, row*T, width, T))
-                # image = image.resize((width//scale, S))
-                image = cv2.resize(image, (width//scale, S), interpolation=cv2.INTER_LANCZOS4)
-
-                patches = image.reshape(1, S, x_patch_count, S, 3) # (y, h, x, w, 3)
-                patches = patches.transpose(0, 2, 1, 3, 4)   # (y, x, h, w, 3)
-                patches = patches[0]
-
-                batch = []
-                for col, patch in enumerate(patches):
-                    if is_white_patch(patch):
-                        continue
-                    # Image.fromarray(patch).save(f'out/{row}_{col}.jpg')
-                    batch.append(patch)
-                    coordinates.append((col*S, row*S))
-                batch = np.array(batch)
-                total_patches[cursor:cursor+len(batch), ...] = batch
-                cursor += len(batch)
-                tq.set_description(f'selected patch count {len(batch)}/{len(patches)} ({row}/{y_patch_count})')
-                tq.refresh()
-
-            patch_count = len(coordinates)
-            f.create_dataset('coordinates', data=coordinates)
-            f['patches'].resize((patch_count, S, S, 3))
-            f.create_dataset('metadata/patch_count', data=patch_count)
-
-        print(f'{len(coordinates)} patches were selected.')
         print('done')
 
     class PreviewArgs(CommonArgs):

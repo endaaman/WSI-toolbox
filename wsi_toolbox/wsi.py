@@ -1,6 +1,27 @@
+import os
+
+from PIL import Image
+import cv2
+import numpy as np
+import h5py
 from openslide import OpenSlide
 import tifffile
 import zarr
+
+
+from .utils.progress import tqdm_or_st
+
+
+def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
+    # white: RGB std < 7.0
+    rgb_std_pixels = np.std(patch, axis=2) < rgb_std_threshold
+    white_pixels = np.sum(rgb_std_pixels)
+    total_pixels = patch.shape[0] * patch.shape[1]
+    white_ratio_calculated = white_pixels / total_pixels
+    # print('whi' if white_ratio_calculated > white_ratio else 'use',
+    #       'std{:.3f}'.format(np.sum(rgb_std_pixels)/total_pixels)
+    #      )
+    return white_ratio_calculated > white_ratio
 
 
 
@@ -109,28 +130,35 @@ class WSIOpenSlideFile(WSIFile):
 
 class WSIProcesser:
     wsi: WSIFile
-    def __init__(self, wsi_path, engine='tifffile'):
-        if a.engine == 'openslide':
-            self.wsi = WSIOpenSlideFile(a.input_path)
-        elif a.engine == 'tifffile':
-            self.wsi = WSITiffFile(a.input_path)
+    def __init__(self, wsi_path, engine='auto'):
+        if engine == 'auto':
+            ext = os.path.splitext(wsi_path)[1]
+            if ext == '.ndpi':
+                engine = 'tifffile'
+            else:
+                engine = 'openslide'
+        self.engine = engine
+        if engine == 'openslide':
+            self.wsi = WSIOpenSlideFile(wsi_path)
+        elif engine == 'tifffile':
+            self.wsi = WSITiffFile(wsi_path)
         else:
             raise ValueError('Invalid engine', a.engine)
-        self.original_mpp = self.wsi.get_mpp()
         self.target_level = 0
+        self.original_mpp = self.wsi.get_mpp()
 
         if 0.360 < self.original_mpp < 0.500:
-            scale = 1
+            self.scale = 1
         elif self.original_mpp < 0.360:
-            scale = 2
+            self.scale = 2
         else:
             raise RuntimeError(f'Invalid scale: mpp={mpp:.6f}')
-        self.mpp = self.original_mpp * scale
+        self.mpp = self.original_mpp * self.scale
 
 
     def convert_to_hdf5(self, hdf5_path, patch_size=256, progress='tqdm'):
-        S = patch_size # scaled patch size
-        T = S*self.scale      # actual patch size
+        S = patch_size   # Scaled patch size
+        T = S*self.scale # Original patch size
         W, H = self.wsi.get_original_size()
         x_patch_count = W//T
         y_patch_count = H//T
@@ -138,6 +166,18 @@ class WSIProcesser:
         row_count = H//T
         coordinates = []
         total_patches = []
+
+        if progress == 'tqdm':
+            print('Target level', self.target_level)
+            print(f'Original mpp: {self.original_mpp:.6f}')
+            print(f'Image mpp: {self.mpp:.6f}')
+            print('Targt resolutions', W, H)
+            print('Obtained resolutions', x_patch_count*S, y_patch_count*S)
+            print('Scale', self.scale)
+            print('Patch size', T)
+            print('Scaled patch size', S)
+            print('row count:', y_patch_count)
+            print('col count:', x_patch_count)
 
         with h5py.File(hdf5_path, 'w') as f:
             f.create_dataset('metadata/original_mpp', data=self.original_mpp)
@@ -161,9 +201,8 @@ class WSIProcesser:
             cursor = 0
             tq = tqdm_or_st(range(row_count), backend=progress)
             for row in tq:
-                image = wsi.read_region((0, row*T, width, T))
-                # image = image.resize((width//scale, S))
-                image = cv2.resize(image, (width//scale, S), interpolation=cv2.INTER_LANCZOS4)
+                image = self.wsi.read_region((0, row*T, width, T))
+                image = cv2.resize(image, (width//self.scale, S), interpolation=cv2.INTER_LANCZOS4)
 
                 patches = image.reshape(1, S, x_patch_count, S, 3) # (y, h, x, w, 3)
                 patches = patches.transpose(0, 2, 1, 3, 4)   # (y, x, h, w, 3)
@@ -186,3 +225,6 @@ class WSIProcesser:
             f.create_dataset('coordinates', data=coordinates)
             f['patches'].resize((patch_count, S, S, 3))
             f.create_dataset('metadata/patch_count', data=patch_count)
+
+        if progress == 'tqdm':
+            print(f'{len(coordinates)} patches were selected.')
