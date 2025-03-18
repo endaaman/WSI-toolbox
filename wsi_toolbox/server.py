@@ -1,8 +1,15 @@
-import streamlit as st
+import re
 import os
-import pandas as pd
 from pathlib import Path
 import time
+import sys
+
+import torch
+import streamlit as st
+torch.classes.__path__ = []
+import pandas as pd
+
+from utils.progress import tqdm_or_st
 
 # Set page config
 st.set_page_config(
@@ -120,6 +127,8 @@ def get_mode_and_multi(selected_files):
     return t, True
 
 
+
+
 DEFAULT_ROOT = 'data'
 
 def main():
@@ -202,77 +211,43 @@ def main():
         operation = st.radio('処理の内容', operations, index=0)
         operation_index = operations.index(operation)
 
+        st.write(f'{multi} {operation_index}')
+
         cluster_name = None
         if multi and operation_index == 0:
             cluster_name = st.text_input('複数WSIを同時にクラスタリングする場合はクラスタ名を入力してください。', key='wsi_cluster_name')
 
+        ok = True
         if st.button('処理を実行', key='process_wsi'):
-            if multi and (not cluster_name):
+            if multi and not cluster_name:
                 st.error('複数同時処理の場合はクラスタ名を入力してください。')
-            else:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+                ok = False
+            elif multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
+                st.error('半角英数のみで入力してください。')
+                ok = False
 
-                # Process each file
-                h5_paths = []
-                for i, file in enumerate(selected_files):
-                    # Update progress
-                    progress = int((i / len(selected_files)) * 100)
-                    progress_bar.progress(progress)
-                    status_text.text(f'Processing {file["name"]}...')
+            if ok:
+                st.write('処理開始')
+                items = list(range(10))
+                results = []
+                for item in tqdm_or_st(items, desc="処理中...", backend="streamlit"):
+                    time.sleep(0.2)
+                    results.append(item * 2)
 
-                    # Convert to h5
-                    h5_path = convert_wsi_to_h5(file['path'])
+                st.write("結果:", results)
 
-                    # Extract features
-                    h5_path = extract_features(h5_path)
-                    h5_paths.append(h5_path)
 
-                # Perform clustering if selected
-                if 'Clustering' in operation:
-                    perform_clustering(h5_paths, cluster_name)
-
-                # Complete progress
-                progress_bar.progress(100)
-                status_text.text('Processing completed!')
     elif mode == 'HDF5':
-        st.subheader('Processing Options')
-        st.write('HDF5 files selected. Available operations:')
+        st.subheader('HDF5ファイル解析オプション')
 
-        # For multiple files, need a cluster name
-        cluster_name = None
-        if multi:
-            cluster_name = st.text_input('Cluster name (required for multiple files)', key='h5_cluster_name')
+        valid = True
+        operations = [
+            '特徴量抽出+クラスタリング',
+            '特徴量抽出',
+        ]
+        operation = st.radio('処理の内容', operations, index=0)
+        operation_index = operations.index(operation)
 
-        if st.button('Perform Clustering', key='process_h5'):
-            if len(selected_files) > 1 and (not cluster_name or cluster_name.strip() == ''):
-                st.error('Cluster name is required for multiple files')
-            else:
-                # Create a progress bar
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
-                # Process each file
-                h5_paths = [file['path'] for file in selected_files]
-
-                # Check if features exist, otherwise extract them
-                status_text.text('Checking for features...')
-
-                # Mock checking for features (in reality would check if features exist in h5)
-                for i, h5_path in enumerate(h5_paths):
-                    progress = int((i / len(h5_paths)) * 50)
-                    progress_bar.progress(progress)
-                    status_text.text(f'Extracting features from {os.path.basename(h5_path)}...')
-                    extract_features(h5_path)
-
-                # Perform clustering
-                status_text.text('Performing clustering...')
-                progress_bar.progress(50)
-                perform_clustering(h5_paths, cluster_name)
-
-                # Complete progress
-                progress_bar.progress(100)
-                status_text.text('Processing completed!')
     else:
         st.warning(f'Invalid mode: {mode}')
 
