@@ -21,124 +21,22 @@ import networkx as nx
 import leidenalg as la
 import igraph as ig
 import hdbscan
-from openslide import OpenSlide
-import tifffile
-import zarr
 import torch
 from torchvision import transforms
 from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
-from .utils import BaseMLCLI, BaseMLArgs, hover_images_on_scatters
-
+from .wsi import WSIOpenSlideFile, WSITiffFile
+from .utils import hover_images_on_scatters
+from .utils.cli import BaseMLCLI, BaseMLArgs
+from .utils.progress import tqdm_or_st
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
 
 
-class WSIFile:
-    def __init__(self, path):
-        pass
-
-    def get_mpp(self):
-        pass
-
-    def get_original_size(self):
-        pass
-
-    def read_region(self, xywh):
-        pass
-
-
-class WSITiffFile(WSIFile):
-    def __init__(self, path):
-        self.tif = tifffile.TiffFile(path)
-
-        store = self.tif.pages[0].aszarr()
-        self.zarr_data = zarr.open(store, mode='r')  # 読み込み専用で開く
-
-    def get_original_size(self):
-        s = self.tif.pages[0].shape
-        return (s[1], s[0])
-
-    def get_mpp(self):
-        tags = self.tif.pages[0].tags
-        resolution_unit = tags.get('ResolutionUnit', None)
-        x_resolution = tags.get('XResolution', None)
-
-        assert resolution_unit
-        assert x_resolution
-
-        x_res_value = x_resolution.value
-        if isinstance(x_res_value, tuple) and len(x_res_value) == 2:
-            # 分数の形式（分子/分母）
-            numerator, denominator = x_res_value
-            resolution = numerator / denominator
-        else:
-            resolution = x_res_value
-
-        # 解像度単位の判定（2=インチ、3=センチメートル）
-        if resolution_unit.value == 2:  # インチ
-            # インチあたりのピクセル数からミクロンあたりのピクセル数へ変換
-            # 1インチ = 25400ミクロン
-            mpp = 25400.0 / resolution
-        elif resolution_unit.value == 3:  # センチメートル
-            # センチメートルあたりのピクセル数からミクロンあたりのピクセル数へ変換
-            # 1センチメートル = 10000ミクロン
-            mpp = 10000.0 / resolution
-        else:
-            mpp = 1.0 / resolution  # 単位不明の場合
-
-        return mpp
-
-    def read_region(self, xywh):
-        x, y, width, height = xywh
-        page = self.tif.pages[0]
-
-        full_width = page.shape[1]  # tifffileでは[height, width]の順
-        full_height = page.shape[0]
-
-        x = max(0, min(x, full_width - 1))
-        y = max(0, min(y, full_height - 1))
-        width = min(width, full_width - x)
-        height = min(height, full_height - y)
-
-        if page.is_tiled:
-            # LLMに聞くと region 引数が現れるがそんなものはない
-            # region = page.asarray(region=(y, x, height, width))
-            region = self.zarr_data[y:y+height, x:x+width]
-        else:
-            full_image = page.asarray()
-            region = full_image[y:y+height, x:x+width]
-
-        # カラーモデルの処理
-        if region.ndim == 2:  # グレースケール
-            region = np.stack([region, region, region], axis=-1)
-        elif region.shape[2] == 4:  # RGBA
-            region = region[:, :, :3]  # RGBのみ取得
-        return region
-
-
-class WSIOpenSlideFile(WSIFile):
-    def __init__(self, path):
-        self.wsi = OpenSlide(path)
-        self.prop = dict(self.wsi.properties)
-
-    def get_mpp(self):
-        return float(self.prop['openslide.mpp-x'])
-
-    def get_original_size(self):
-        dim = self.wsi.level_dimensions[0]
-        return (dim[0], dim[1])
-
-    def read_region(self, xywh):
-        # self.wsi.read_region((0, row*T), target_level, (width, T))
-        # self.wsi.read_region((x, y), target_level, (w, h))
-        img = self.wsi.read_region((xywh[0], xywh[1]), 0, (xywh[2], xywh[3])).convert('RGB')
-        img = np.array(img.convert('RGB'))
-        return img
 
 
 def sigmoid(x):
@@ -193,6 +91,7 @@ def create_frame(size, color, text, font):
     return frame
 
 
+
 class CLI(BaseMLCLI):
     class CommonArgs(BaseMLArgs):
         # This includes `--seed` param
@@ -204,7 +103,7 @@ class CLI(BaseMLCLI):
         output_path: str = Field(..., l='--out', s='-o')
         patch_size: int = 256
         overwrite: bool = False
-        lib: str = Field('openslide', choices=['openslide', 'tifffile'])
+        engine: str = Field('openslide', choices=['openslide', 'tifffile'])
 
     def run_wsi2h5(self, a):
         if os.path.exists(a.output_path):
@@ -214,20 +113,19 @@ class CLI(BaseMLCLI):
             print(f'{a.output_path} exists but overwriting it.')
 
         wsi: WSIFile
-        if a.lib == 'openslide':
+        if a.engine == 'openslide':
             wsi = WSIOpenSlideFile(a.input_path)
-        elif a.lib == 'tifffile':
+        elif a.engine == 'tifffile':
             wsi = WSITiffFile(a.input_path)
         else:
-            raise ValueError('Invalid lib', a.lib)
+            raise ValueError('Invalid engine', a.engine)
 
         original_mpp = wsi.get_mpp()
+        target_level = 0
 
         if 0.360 < original_mpp < 0.500:
-            target_level = 0
             scale = 1
         elif original_mpp < 0.360:
-            target_level = 0
             scale = 2
         else:
             raise RuntimeError(f'Invalid scale: mpp={mpp:.6f}')
@@ -259,7 +157,9 @@ class CLI(BaseMLCLI):
         coordinates = []
         total_patches = []
 
-        os.makedirs(os.path.dirname(a.output_path), exist_ok=True)
+        d = os.path.dirname(a.output_path)
+        if d:
+            os.makedirs(d, exist_ok=True)
 
         with h5py.File(a.output_path, 'w') as f:
             f.create_dataset('metadata/original_mpp', data=original_mpp)
@@ -775,6 +675,7 @@ class CLI(BaseMLCLI):
                     print('slide_feature OK')
                 else:
                     print('Both "slide_feature" and "gigapath/slide_feature" do not exist')
+
 
 
 if __name__ == '__main__':
