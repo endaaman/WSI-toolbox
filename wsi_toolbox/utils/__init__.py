@@ -1,3 +1,6 @@
+import warnings
+import logging
+
 from PIL import Image
 from PIL.Image import Image as ImageType
 import cv2
@@ -5,10 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
-
 from .cli import BaseMLCLI, BaseMLArgs
-
-
 
 
 def yes_no_prompt(question):
@@ -73,4 +73,12 @@ def hover_images_on_scatters(scatters, imagess, ax=None, offset=(150, 30)):
 
     fig.canvas.mpl_connect('motion_notify_event', hover)
 
-
+def is_in_streamlit_context():
+    logging.getLogger("streamlit").setLevel(logging.ERROR)
+    warnings.filterwarnings("ignore", module="streamlit.*")
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        return ctx is not None
+    except ImportError:
+        return False
