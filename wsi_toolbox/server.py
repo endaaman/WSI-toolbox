@@ -1,9 +1,13 @@
 import re
+import time
 import os
 from pathlib import Path
 import time
 import sys
+import warnings
 
+import numpy as np
+import h5py
 import torch
 import streamlit as st
 torch.classes.__path__ = []
@@ -13,50 +17,17 @@ sys.path.append(str(Path(__file__).parent))
 __package__ = 'wsi_toolbox'
 
 from .utils.progress import tqdm_or_st
-from .wsi import WSIProcesser
+from .processor import WSIProcessor, TileProcessor
 
-# Set page config
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
+warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
+
 st.set_page_config(
     page_title='WSI Analysis System',
     page_icon='🔬',
     layout='wide'
 )
 
-# Mock functions for processing steps (to be implemented separately)
-def convert_wsi_to_h5(file_path, output_dir=None):
-    '''Mock function to convert WSI to HDF5 with patches'''
-    st.info(f'Converting {file_path} to h5...')
-    # Simulate processing time
-    time.sleep(2)
-    output_path = str(file_path).replace(Path(file_path).suffix, '.h5')
-    st.success(f'Converted to {output_path}')
-    return output_path
-
-def extract_features(h5_path):
-    '''Mock function to extract features using Prov-GigaPath model'''
-    st.info(f'Extracting features from {h5_path}...')
-    # Simulate processing time
-    time.sleep(3)
-    st.success(f'Features extracted and saved to {h5_path}')
-    return h5_path
-
-def perform_clustering(h5_paths, name=None):
-    '''Mock function for clustering features using leidenalg'''
-    st.info(f'Performing clustering on {len(h5_paths)} files...')
-    # Simulate processing time
-    time.sleep(4)
-
-    suffix = f'_{name}' if name else ''
-    output_files = []
-
-    for h5_path in h5_paths:
-        base_path = str(h5_path).replace('.h5', '')
-        umap_path = f'{base_path}{suffix}_umap.jpg'
-        preview_path = f'{base_path}{suffix}_preview.jpg'
-        output_files.append((umap_path, preview_path))
-
-    st.success(f'Clustering completed. UMAP and preview images generated.')
-    return output_files
 
 def is_wsi_file(file_path):
     '''Check if file is a WSI file based on extension'''
@@ -66,6 +37,28 @@ def is_wsi_file(file_path):
 def is_h5_file(file_path):
     '''Check if file is an HDF5 file'''
     return Path(file_path).suffix.lower() == '.h5'
+
+def get_hdf5_detail(hdf_path):
+    with h5py.File(hdf_path, 'r') as f:
+        if 'metadata/patch_count' not in f:
+            return {
+                'supported': False,
+                'has_features': False,
+                'patch_count': 0,
+                'mpp': 0,
+                'cols': 0,
+                'rows': 0,
+            }
+        patch_count = f['metadata/patch_count'][()]
+        has_features = 'gigapath/features' in f and (len(f['gigapath/features']) == patch_count)
+        return {
+            'supported': True,
+            'has_features': has_features,
+            'patch_count': patch_count,
+            'mpp': f['metadata/mpp'][()],
+            'cols': f['metadata/cols'][()],
+            'rows': f['metadata/rows'][()],
+        }
 
 def list_files(directory):
     files = []
@@ -77,12 +70,14 @@ def list_files(directory):
         if os.path.isfile(item_path):
             icon = "📄"
             file_type = "Other"
+            detail = None
             if is_wsi_file(item_path):
                 icon = "🔬"
                 file_type = "WSI"
             elif is_h5_file(item_path):
                 icon = "📊"
                 file_type = "HDF5"
+                detail = get_hdf5_detail(item_path)
 
             size = os.path.getsize(item_path)
             if size > 1024*1024*1024:
@@ -99,7 +94,8 @@ def list_files(directory):
                 "path": item_path,
                 "type": file_type,
                 "size": size_str,
-                "modified": time.ctime(os.path.getmtime(item_path))
+                "modified": time.ctime(os.path.getmtime(item_path)),
+                "detail": detail,
             })
 
         elif os.path.isdir(item_path):
@@ -109,12 +105,13 @@ def list_files(directory):
                 "path": item_path,
                 "type": "Directory",
                 "size": "",
-                "modified": time.ctime(os.path.getmtime(item_path))
+                "modified": time.ctime(os.path.getmtime(item_path)),
+                "detail": None,
             })
 
-    # ディレクトリを先に、次にファイルを表示
     all_items = directories + files
-    return pd.DataFrame(all_items)
+    return all_items
+
 
 
 def get_mode_and_multi(selected_files):
@@ -182,13 +179,16 @@ def main():
             'size': 'ファイルサイズ',
             'modified': 'Last Modified',
             'path': None,  # Hide path column
+            'detail': None,  # Hide path column
         },
         hide_index=True,
         use_container_width=True,
         disabled=['name', 'type', 'size', 'modified'],
     )
 
-    selected_files = edited_df[edited_df['selected'] == True].to_dict('records')
+    # selected_files = edited_df[edited_df['selected'] == True].to_dict('records')
+    selected_indices = edited_df[edited_df['selected'] == True].index.tolist()
+    selected_files = [files[i] for i in selected_indices]
 
     mode, multi = get_mode_and_multi(selected_files)
     if mode == 'Empty':
@@ -206,52 +206,94 @@ def main():
     elif mode == 'Mix':
         st.warning('単一種類のファイルを選択してください。')
     elif mode == 'WSI':
-        st.subheader('WSI解析オプション')
+        st.subheader('HDF5に変換し特徴量を抽出する')
+        st.write('変換と特徴量抽出の2ステップを実行します。結構時間がかかります。')
 
-        operations = [
-            'HDF5に変換+特徴量抽出+クラスタリング',
-            'HDF5に変換+特徴量抽出',
-            'HDF5に変換のみ',
-        ]
-        operation = st.radio('処理の内容', operations, index=0)
-        operation_index = operations.index(operation)
+        do_clustering = st.checkbox(
+            'クラスタリングも実行する' + '' if not multi else '(クラスタリングも同時に行うには単数選択してください。)',
+            disabled=multi, value=not multi)
 
-        st.write(f'{multi} {operation_index}')
-
-        # cluster_name = None
-        # if multi and operation_index == 0:
-        #     cluster_name = st.text_input('複数WSIを同時にクラスタリングする場合はクラスタ名を入力してください。', key='wsi_cluster_name')
-
-        ok = True
         if st.button('処理を実行', key='process_wsi'):
-            if multi:
-                st.error('一つだけ選択してください。')
-                ok = False
-            # if multi and not cluster_name:
-            #     st.error('複数同時処理の場合はクラスタ名を入力してください。')
-            #     ok = False
-            # elif multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
-            #     st.error('半角英数のみで入力してください。')
-            #     ok = False
+            st.write('HDF5ファイルに変換中...')
+            wsi_path = selected_files[0]['path']
+            basename = os.path.splitext(wsi_path)[0]
+            hdf5_path = f'{basename}.h5'
+            hdf5_tmp_path = f'{basename}.h5.tmp'
+            wp = WSIProcessor(wsi_path)
+            wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
+            os.rename(hdf5_tmp_path, hdf5_path)
+            st.write('HDF5ファイルに変換完了。')
 
-            if ok:
-                st.write('処理開始')
-                input_path = selected_files[0]['path']
-                output_path = f'{os.path.splitext(input_path)[0]}.h5'
-                p = WSIProcesser(input_path)
-                p.convert_to_hdf5(output_path, patch_size=256, progress='streamlit')
+            st.write('による特徴量抽出中...')
+            tp = TileProcessor(model_name='gigapath', device='cuda')
+            tp.evaluate_hdf5_file(hdf5_path, batch_size=256, progress='streamlit', overwrite=True)
+            st.write('特徴量抽出完了。')
+
+            if multi:
+                st.write('すべての処理が完了しました。')
+                st.write('クラスタリングも実行する場合はHDF5から選択してください。')
+            else:
+                st.write('クラスタリング中...')
+                time.sleep(1)
+                st.write('クラスタリング完了。')
 
 
     elif mode == 'HDF5':
         st.subheader('HDF5ファイル解析オプション')
+        df_details = pd.DataFrame([{'name': f['name'], **f['detail']} for f in selected_files])
+        if not np.all(df_details['supported']):
+            st.error('サポートされていないHDF5ファイルが選択されました。')
+        else:
+            df_details['has_features'] = df_details['has_features'].map({True: '抽出済み', False: '未抽出'})
+            st.dataframe(
+                df_details,
+                column_config={
+                    'name': 'ファイル名',
+                    'has_features': '特徴量抽出状況',
+                    'patch_count': 'パッチ数',
+                    'mpp': 'micro/pixel',
+                    'supported': None,
+                },
+                hide_index=True,
+                use_container_width=False,
+            )
 
-        valid = True
-        operations = [
-            '特徴量抽出+クラスタリング',
-            '特徴量抽出',
-        ]
-        operation = st.radio('処理の内容', operations, index=0)
-        operation_index = operations.index(operation)
+            if st.button('クラスタリングを実行', key='process_wsi'):
+                for f in selected_files:
+                    if not f['detail']['has_features']:
+                        st.write(f'{f["name"]}の特徴量抽出中...')
+                        tp = TileProcessor(model_name='gigapath', device='cuda')
+                        tp.evaluate_hdf5_file(f['path'], batch_size=256, progress='streamlit', overwrite=True)
+                        st.write('特徴量抽出完了。')
+
+                st.write('クラスタリング中...')
+                time.sleep(1)
+                st.write('クラスタリング完了。')
+
+
+        # if multi and not cluster_name:
+        #     st.error('複数同時処理の場合はクラスタ名を入力してください。')
+        #     ok = False
+        # elif multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
+        #     st.error('半角英数のみで入力してください。')
+        #     ok = False
+
+        # ok = True
+        # if st.button('クラスタリングを実行', key='process_wsi'):
+        #     if ok:
+
+        #         if operation_index == 0:
+        #             # HDF5変換のみ
+        #             pass
+        #         elif operation_index > 0:
+        #             # 特徴量抽出
+        #             tp = TileProcessor(model_name='gigapath', device='cuda')
+        #             tp.evaluate_hdf5_file(hdf5_path, progress='streamlit')
+
+        #             if operation_index > 1:
+        #                 # HDF5変換+特徴量抽出+クラスタリング
+        #                 pass
+        #         st.write('処理完了')
 
     else:
         st.warning(f'Invalid mode: {mode}')

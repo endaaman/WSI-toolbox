@@ -27,15 +27,14 @@ from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
-from .wsi import WSIProcesser
+from .processor import WSIProcessor, TileProcessor
 from .utils import hover_images_on_scatters
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.progress import tqdm_or_st
 
+
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
-
-
 
 
 
@@ -104,7 +103,7 @@ class CLI(BaseMLCLI):
         if d:
             os.makedirs(d, exist_ok=True)
 
-        p = WSIProcesser(a.input_path, engine=a.engine)
+        p = WSIProcessor(a.input_path, engine=a.engine)
         p.convert_to_hdf5(a.output_path, patch_size=a.patch_size, progress='tqdm')
 
         print('done')

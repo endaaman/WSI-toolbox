@@ -1,4 +1,5 @@
 import os
+import gc
 
 from PIL import Image
 import cv2
@@ -7,6 +8,8 @@ import h5py
 from openslide import OpenSlide
 import tifffile
 import zarr
+import torch
+import timm
 
 
 from .utils.progress import tqdm_or_st
@@ -128,7 +131,7 @@ class WSIOpenSlideFile(WSIFile):
         return img
 
 
-class WSIProcesser:
+class WSIProcessor:
     wsi: WSIFile
     def __init__(self, wsi_path, engine='auto'):
         if engine == 'auto':
@@ -218,7 +221,7 @@ class WSIProcesser:
                 batch = np.array(batch)
                 total_patches[cursor:cursor+len(batch), ...] = batch
                 cursor += len(batch)
-                tq.set_description(f'selected patch count {len(batch)}/{len(patches)} ({row}/{y_patch_count})')
+                tq.set_description(f'Selected patch count {len(batch)}/{len(patches)} ({row}/{y_patch_count})')
                 tq.refresh()
 
             patch_count = len(coordinates)
@@ -228,3 +231,85 @@ class WSIProcesser:
 
         if progress == 'tqdm':
             print(f'{len(coordinates)} patches were selected.')
+
+
+class TileProcessor:
+    def __init__(self, model_name='gigapath', device='cuda'):
+        assert model_name in ['uni', 'gigapath']
+        self.model_name = model_name
+        self.device = device
+        self.target_name = f'{model_name}/features'
+
+    def evaluate_hdf5_file(self, hdf5_path, progress='tqdm', batch_size=256, overwrite=True):
+        if self.model_name == 'uni':
+            model = timm.create_model('hf-hub:MahmoodLab/uni',
+                                      pretrained=True,
+                                      dynamic_img_size=True,
+                                      init_values=1e-5)
+        elif self.model_name == 'gigapath':
+            model = timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
+                                      pretrained=True,
+                                      dynamic_img_size=True)
+        else:
+            raise ValueError('Invalid model_name', self.model_name)  # model_nameをself.model_nameに修正
+
+        model = model.eval().to(self.device)
+
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(self.device)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(self.device)
+
+        done = False
+
+        with h5py.File(hdf5_path, 'r+') as f:  # 'r+'に変更して読み書き両方可能に
+            try:
+                if self.target_name in f:
+                    if overwrite:
+                        print('Overwriting features.')
+                        del f[self.target_name]
+                    else:
+                        return
+
+                patch_count = f['metadata/patch_count'][()]
+                batch_idx = [
+                    (i, min(i+batch_size, patch_count))
+                    for i in range(0, patch_count, batch_size)
+                ]
+
+                # バッファに全部メモリを確保せず、直接書き込む
+                # データセットを前もって作成
+                f.create_dataset(self.target_name, shape=(patch_count, model.num_features), dtype=np.float32)
+
+                tq = tqdm_or_st(batch_idx, backend=progress)
+                for i0, i1 in tq:
+                    coords = f['coordinates'][i0:i1]
+                    x = f['patches'][i0:i1]
+                    x = (torch.from_numpy(x)/255).permute(0, 3, 1, 2) # BHWC->BCHW
+                    x = x.to(self.device)
+                    x = (x-mean)/std
+
+                    with torch.no_grad():
+                        h = model(x)
+
+                    h_np = h.cpu().detach().numpy()
+
+                    f[self.target_name][i0:i1] = h_np
+
+                    # 明示的にGPUメモリを解放
+                    del x, h
+                    torch.cuda.empty_cache()
+                    tq.set_description(f'Processing {i0}-{i1}(total={patch_count})')
+                    tq.refresh()
+
+                print('embeddings dimension', f[self.target_name].shape)
+                done = True
+
+            finally:
+                if not done:
+                    del f[self.target_name]
+                    print(f'ABORTED! deleted {self.target_name}')
+                del model, mean, std
+                torch.cuda.empty_cache()
+                gc.collect()
+
+
+
