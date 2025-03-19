@@ -111,6 +111,7 @@ class CLI(BaseMLCLI):
     class PreviewArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
+        cluster_name: str = Field('', l='--name', s='-N')
         size: int = 64
         model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
         open: bool = False
@@ -120,7 +121,10 @@ class CLI(BaseMLCLI):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_thumb.jpg'
+            if a.cluster_name:
+                output_path = f'{base}_thumb_{a.cluster_name}.jpg'
+            else:
+                output_path = f'{base}_thumb.jpg'
 
         cmap = plt.get_cmap('tab20')
         with h5py.File(a.input_path, 'r') as f:
@@ -131,10 +135,13 @@ class CLI(BaseMLCLI):
 
             show_clusters = False
             clusters = []
+            cluster_path = f'{a.model}/clusters'
+            if a.cluster_name:
+                cluster_path += f'_{a.cluster_name}'
             if a.model != 'none':
-                if f'{a.model}/clusters' in f:
+                if cluster_path in f:
                     show_clusters = True
-                    clusters = f[f'{a.model}/clusters'][:]
+                    clusters = f[cluster_path][:]
                     print('loaded cluster data', clusters.shape)
                 else:
                     print(f'"{a.model}/clusters" was not found in h5 data.')
@@ -317,7 +324,8 @@ class CLI(BaseMLCLI):
 
 
     class ClusterArgs(CommonArgs):
-        input_path: str = Field(..., l='--in', s='-i')
+        input_paths: list[str] = Field(..., l='--in', s='-i')
+        name: str = ''
         models: list[str] = Field(['gigapath'], choices=['uni', 'gigapath'])
         method: str = Field('leiden', s='-M')
         nosave: bool = False
@@ -325,26 +333,36 @@ class CLI(BaseMLCLI):
 
     def run_cluster(self, a):
         assert len(a.models) > 0
-        name = {
+        model_name = {
             frozenset(['uni']): 'uni',
             frozenset(['gigapath']): 'gigapath',
             frozenset(['uni', 'gigapath']): 'unified'
         }.get(frozenset(a.models))
-        if not name:
+        if not model_name:
             raise ValueError('Invalid models', a.models)
 
-        with h5py.File(a.input_path, 'r') as f:
-            patch_count = f['metadata/patch_count'][()]
-            feature_arrays = []
-            print(f.keys())
-            for model in a.models:
-                path = f'{model}/features'
-                if path in f:
-                    feature_arrays.append(f[path][:])
-                else:
-                    raise RuntimeError(f'"{path}" does not exist. Do `process-patches` first')
-            features = np.concatenate(feature_arrays, axis=1)
+        multi = len(a.input_paths) > 1
 
+        if multi:
+            if not a.name:
+                raise RuntimeError('Multiple files provided but name was not specified.')
+
+        features = []
+        lengths = []
+        for input_path in a.input_paths:
+            with h5py.File(input_path, 'r') as f:
+                patch_count = f['metadata/patch_count'][()]
+                feature_arrays = []
+                for model in a.models:
+                    path = f'{model}/features'
+                    if path in f:
+                        feature_arrays.append(f[path][:])
+                    else:
+                        raise RuntimeError(f'"{path}" does not exist. Do `process-patches` first')
+                features.append(np.concatenate(feature_arrays, axis=1))
+                lengths.append(patch_count)
+
+        features = np.concatenate(features)
         print('Loaded features', features.shape)
         scaler = StandardScaler()
         scaled_features = scaler.fit_transform(features)
@@ -436,7 +454,6 @@ class CLI(BaseMLCLI):
                 size = 7
             plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
 
-
         for cluster_id in cluster_ids:
             if cluster_id < 0:
                 continue
@@ -456,18 +473,30 @@ class CLI(BaseMLCLI):
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
 
-        if not a.nosave:
-            with h5py.File(a.input_path, 'a') as f:
-                path = f'{name}/clusters'
-                if path in f:
-                    del f[path]
-                f.create_dataset(path, data=clusters)
-            print(f'Save clusters to {a.input_path}')
-
-            base, ext = os.path.splitext(a.input_path)
+        if multi:
+            # multiple
+            dir = os.path.dirname(a.input_paths[0])
+            fig_path = f'{dir}/{a.name}.png'
+        else:
+            base, ext = os.path.splitext(a.input_paths[0])
             fig_path = f'{base}_umap.png'
-            plt.savefig(fig_path)
-            print(f'wrote {fig_path}')
+        plt.savefig(fig_path)
+        print(f'wrote {fig_path}')
+
+        if not a.nosave:
+            cursor = 0
+            for input_path, length in zip(a.input_paths, lengths):
+                cc = clusters[cursor:cursor+length]
+                cursor += length
+                with h5py.File(input_path, 'a') as f:
+                    if multi:
+                        path = f'{model_name}/clusters_{a.name}'
+                    else:
+                        path = f'{model_name}/clusters'
+                    if path in f:
+                        del f[path]
+                    f.create_dataset(path, data=cc)
+                print(f'Save clusters to {input_path}')
 
         if not a.noshow:
             plt.show()
