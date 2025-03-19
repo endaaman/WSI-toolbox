@@ -4,14 +4,22 @@ import gc
 from PIL import Image
 import cv2
 import numpy as np
+from matplotlib import pyplot as plt, colors as mcolors
 import h5py
 from openslide import OpenSlide
 import tifffile
 import zarr
 import torch
 import timm
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.neighbors import NearestNeighbors
+import umap
+import networkx as nx
+import leidenalg as la
+import igraph as ig
 
-
+from .utils import find_optimal_components
 from .utils.progress import tqdm_or_st
 
 
@@ -313,3 +321,143 @@ class TileProcessor:
 
 
 
+
+class ClusterProcessor:
+    def __init__(self, hdf5_paths, model_name='gigapath', cluster_name=''):
+        assert model_name in ['uni', 'gigapath']
+        self.multi = len(hdf5_paths) > 1
+        if self.multi:
+            if not cluster_name:
+                raise RuntimeError('Multiple files provided but name was not specified.')
+
+        self.hdf5_paths = hdf5_paths
+        self.model_name = model_name
+        self.cluster_name = cluster_name
+
+    def anlyze_clusters(self):
+        features = []
+        lengths = []
+        for hdf5_path in self.hdf5_paths:
+            with h5py.File(hdf5_path, 'r') as f:
+                patch_count = f['metadata/patch_count'][()]
+                features.append(f[f'{self.model_name}/features'][:])
+                lengths.append(patch_count)
+
+        features = np.concatenate(features)
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
+
+        print('UMAP fitting...')
+        reducer = umap.UMAP(
+                # n_neighbors=30,
+                # min_dist=0.05,
+                n_components=2,
+                # random_state=a.seed
+            )
+        embedding = reducer.fit_transform(scaled_features)
+        print('UMAP done')
+
+        n_components = find_optimal_components(scaled_features)
+        print('Optimal n_components:', n_components)
+        pca = PCA(n_components)
+        target_features = pca.fit_transform(scaled_features)
+
+        k = int(np.sqrt(len(target_features)))
+        nn = NearestNeighbors(n_neighbors=k).fit(target_features)
+        distances, indices = nn.kneighbors(target_features)
+
+        G = nx.Graph()
+        n_samples = embedding.shape[0]
+        G.add_nodes_from(range(n_samples))
+
+        # Add edges based on k-nearest neighbors
+        for i in range(n_samples):
+            for j in indices[i]:
+                if i != j:  # Avoid self-loops
+                    # Add edge weight based on distance (closer points have higher weights)
+                    distance = np.linalg.norm(embedding[i] - embedding[j])
+                    weight = np.exp(-distance)  # Convert distance to similarity
+                    G.add_edge(i, j, weight=weight)
+
+        # Convert NetworkX graph to igraph for Leiden algorithm
+        edges = list(G.edges())
+        weights = [G[u][v]['weight'] for u, v in edges]
+        ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
+
+        partition = la.find_partition(
+            ig_graph,
+            la.RBConfigurationVertexPartition,
+            weights='weight',
+            resolution_parameter=1.0, # maybe most adaptive
+            # resolution_parameter=0.5, # more coarse cluster
+        )
+
+        # Convert partition result to cluster assignments
+        clusters = np.full(n_samples, -1)  # Initialize all as noise
+        for i, community in enumerate(partition):
+            for node in community:
+                clusters[node] = i
+
+        n_clusters = len(set(clusters)) - (1 if -1 in clusters else 0)
+        n_noise = list(clusters).count(-1)
+        # print('n_clusters', n_clusters)
+        # print('n_noise', n_noise)
+
+        cursor = 0
+        for hdf5_path, length in zip(self.hdf5_paths, lengths):
+            cc = clusters[cursor:cursor+length]
+            cursor += length
+            with h5py.File(hdf5_path, 'a') as f:
+                if self.multi:
+                    path = f'{self.model_name}/clusters_{self.cluster_name}'
+                else:
+                    path = f'{self.model_name}/clusters'
+                if path in f:
+                    del f[path]
+                f.create_dataset(path, data=cc)
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        cmap = plt.get_cmap('tab20')
+        # colors = plt.cm.rainbow(np.linspace(0, 1, len(set(clusters))))
+        cluster_ids = sorted(list(set(clusters)))
+        for i, cluster_id in enumerate(cluster_ids):
+            coords = embedding[clusters == cluster_id]
+            if cluster_id == -1:
+                color = 'black'
+                label = 'Noise'
+                size = 12
+            else:
+                color = [cmap(cluster_id % 20)]
+                label = f'Cluster {cluster_id}'
+                size = 7
+            plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
+
+        for cluster_id in cluster_ids:
+            if cluster_id < 0:
+                continue
+            cluster_points = embedding[clusters == cluster_id]
+            if len(cluster_points) < 1:
+                continue
+            centroid_x = np.mean(cluster_points[:, 0])
+            centroid_y = np.mean(cluster_points[:, 1])
+            ax.text(centroid_x, centroid_y, str(cluster_id),
+                   fontsize=12, fontweight='bold',
+                   ha='center', va='center',
+                   bbox=dict(facecolor='white', alpha=0.1, edgecolor='none'))
+
+        plt.title(f'UMAP + Clustering')
+        plt.xlabel('UMAP Dimension 1')
+        plt.ylabel('UMAP Dimension 2')
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+
+        if self.multi:
+            # multiple
+            dir = os.path.dirname(self.hdf5_paths[0])
+            fig_path = f'{dir}/{self.cluster_name}.png'
+        else:
+            base, ext = os.path.splitext(self.hdf5_paths[0])
+            fig_path = f'{base}_umap.png'
+        plt.savefig(fig_path)
+        print(f'wrote {fig_path}')
+        return fig_path

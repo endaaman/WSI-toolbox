@@ -28,7 +28,7 @@ import timm
 from gigapath import slide_encoder
 
 from .processor import WSIProcessor, TileProcessor
-from .utils import hover_images_on_scatters
+from .utils import hover_images_on_scatters, find_optimal_components
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.progress import tqdm_or_st
 
@@ -41,15 +41,6 @@ warnings.filterwarnings('ignore', category=FutureWarning, message="You are using
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-
-def find_optimal_components(features, threshold=0.95):
-    pca = PCA()
-    pca.fit(features)
-    explained_variance = pca.explained_variance_ratio_
-    # 累積寄与率が95%を超える次元数を選択する例
-    cumulative_variance = np.cumsum(explained_variance)
-    optimal_n = np.argmax(cumulative_variance >= threshold) + 1
-    return min(optimal_n, len(features) - 1)
 
 
 def get_platform_font():

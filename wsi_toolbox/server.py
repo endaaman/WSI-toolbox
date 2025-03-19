@@ -7,18 +7,22 @@ import sys
 import warnings
 
 import numpy as np
+from PIL import Image
 import h5py
 import torch
-import streamlit as st
-torch.classes.__path__ = []
 import pandas as pd
+
+torch.classes.__path__ = []
+import streamlit as st
 
 sys.path.append(str(Path(__file__).parent))
 __package__ = 'wsi_toolbox'
 
 from .utils.progress import tqdm_or_st
-from .processor import WSIProcessor, TileProcessor
+from .processor import WSIProcessor, TileProcessor, ClusterProcessor
 
+
+Image.MAX_IMAGE_PIXELS = 3_500_000_000
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
@@ -30,12 +34,10 @@ st.set_page_config(
 
 
 def is_wsi_file(file_path):
-    '''Check if file is a WSI file based on extension'''
     extensions = ['.ndpi', '.svs']
     return Path(file_path).suffix.lower() in extensions
 
 def is_h5_file(file_path):
-    '''Check if file is an HDF5 file'''
     return Path(file_path).suffix.lower() == '.h5'
 
 def get_hdf5_detail(hdf_path):
@@ -60,11 +62,17 @@ def get_hdf5_detail(hdf_path):
             'rows': f['metadata/rows'][()],
         }
 
+
+IMAGE_EXTENSIONS = { '.bmp', '.gif', '.icns', '.ico', '.jpg', '.jpeg', '.png', '.tif', '.tiff', }
+def is_image_file(file_path):
+    return Path(file_path).suffix.lower() in IMAGE_EXTENSIONS
+
+
 def list_files(directory):
     files = []
     directories = []
 
-    for item in os.listdir(directory):
+    for item in sorted(os.listdir(directory)):
         item_path = os.path.join(directory, item)
 
         if os.path.isfile(item_path):
@@ -72,12 +80,15 @@ def list_files(directory):
             file_type = "Other"
             detail = None
             if is_wsi_file(item_path):
-                icon = "🔬"
+                icon = '🔬'
                 file_type = "WSI"
             elif is_h5_file(item_path):
-                icon = "📊"
+                icon = '📊'
                 file_type = "HDF5"
                 detail = get_hdf5_detail(item_path)
+            elif is_image_file(item_path):
+                icon = '🖼️'
+                file_type = "Image"
 
             size = os.path.getsize(item_path)
             if size > 1024*1024*1024:
@@ -88,9 +99,10 @@ def list_files(directory):
                 size_str = f'{size/1024:.1f} KB'
             else:
                 size_str = f'{size} bytes'
+
             files.append({
                 "selected": False,
-                "name": f"{icon} {item}",
+                "name": f'{item} {icon}',
                 "path": item_path,
                 "type": file_type,
                 "size": size_str,
@@ -128,6 +140,16 @@ def get_mode_and_multi(selected_files):
     return t, True
 
 
+def format_size(size_bytes):
+    return 'AA'
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes/1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes/(1024*1024):.1f} MB"
+    else:
+        return f"{size_bytes/(1024*1024*1024):.1f} GB"
 
 
 DEFAULT_ROOT = 'data'
@@ -177,7 +199,10 @@ def main():
             'name': 'ファイル名',
             'type': '種別',
             'size': 'ファイルサイズ',
-            'modified': 'Last Modified',
+            'modified': st.column_config.DateColumn(
+                'Birthday',
+                format='YYYY/MM/DD hh:mm:ss',
+            ),
             'path': None,  # Hide path column
             'detail': None,  # Hide path column
         },
@@ -205,38 +230,49 @@ def main():
         st.warning('WSI(.ndpi, .svs)ファイルもしくはHDF5ファイル(.h5)を選択しください。')
     elif mode == 'Mix':
         st.warning('単一種類のファイルを選択してください。')
+    elif mode == 'Image':
+        for f in selected_files:
+            img = Image.open(f['path'])
+            st.image(img)
     elif mode == 'WSI':
         st.subheader('HDF5に変換し特徴量を抽出する')
-        st.write('変換と特徴量抽出の2ステップを実行します。結構時間がかかります。')
+        st.write('変換と特徴量抽出の2ステップを実行します。どちらも結構時間がかかります。')
 
         do_clustering = st.checkbox(
-            'クラスタリングも実行する' + '' if not multi else '(クラスタリングも同時に行うには単数選択してください。)',
+            'クラスタリングも実行する(クラスタリングも同時に行うには一つだけ選択してください。)',
             disabled=multi, value=not multi)
 
         if st.button('処理を実行', key='process_wsi'):
-            st.write('HDF5ファイルに変換中...')
             wsi_path = selected_files[0]['path']
             basename = os.path.splitext(wsi_path)[0]
             hdf5_path = f'{basename}.h5'
             hdf5_tmp_path = f'{basename}.h5.tmp'
             wp = WSIProcessor(wsi_path)
-            wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
+            with st.spinner('HDF5ファイルに変換中...', show_time=True):
+                wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
             os.rename(hdf5_tmp_path, hdf5_path)
             st.write('HDF5ファイルに変換完了。')
 
-            st.write('による特徴量抽出中...')
             tp = TileProcessor(model_name='gigapath', device='cuda')
-            tp.evaluate_hdf5_file(hdf5_path, batch_size=256, progress='streamlit', overwrite=True)
+            with st.spinner('特徴量抽出中...', show_time=True):
+                tp.evaluate_hdf5_file(hdf5_path, batch_size=256, progress='streamlit', overwrite=True)
             st.write('特徴量抽出完了。')
 
             if multi:
                 st.write('すべての処理が完了しました。')
-                st.write('クラスタリングも実行する場合はHDF5から選択してください。')
+                st.write('※クラスタリングも実行する場合はHDF5から選択してください。')
             else:
-                st.write('クラスタリング中...')
-                time.sleep(1)
-                st.write('クラスタリング完了。')
-
+                if do_clustering:
+                    cp = ClusterProcessor(
+                            selected_files[0]['path'],
+                            model_name='gigapath',
+                            cluster_name='')
+                    with st.spinner(f'クラスタリング中...'):
+                        fig_path = cp.anlyze_clusters()
+                    st.write('クラスタリング完了。')
+                    img = Image.open(fig_path)
+                    st.image(img)
+                st.write('すべての処理が完了しました。')
 
     elif mode == 'HDF5':
         st.subheader('HDF5ファイル解析オプション')
@@ -258,42 +294,39 @@ def main():
                 use_container_width=False,
             )
 
-            if st.button('クラスタリングを実行', key='process_wsi'):
+            ok = True
+            cluster_name = ''
+            if multi:
+                cluster_name = st.text_input(
+                    '',
+                    value='',
+                    placeholder='半角英数字でクラスタ名を入力してください',
+                )
+                if not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
+                    st.error('複数同時処理の場合はクラスタ名を入力してください。')
+                    ok = False
+
+            if ok and st.button('クラスタリングを実行', key='process_wsi'):
                 for f in selected_files:
                     if not f['detail']['has_features']:
-                        st.write(f'{f["name"]}の特徴量抽出中...')
+                        st.write(f'{f["name"]}の特徴量が未抽出なので、抽出を行います。')
+                        st.write(f'特徴量抽出中...')
                         tp = TileProcessor(model_name='gigapath', device='cuda')
                         tp.evaluate_hdf5_file(f['path'], batch_size=256, progress='streamlit', overwrite=True)
                         st.write('特徴量抽出完了。')
 
-                st.write('クラスタリング中...')
-                time.sleep(1)
+                cp = ClusterProcessor(
+                        [f['path'] for f in selected_files],
+                        model_name='gigapath',
+                        cluster_name=cluster_name)
+                t = 'と'.join([f['name'] for f in selected_files])
+                with st.spinner(f'{t}をクラスタリング中...'):
+                    fig_path = cp.anlyze_clusters()
+
                 st.write('クラスタリング完了。')
-
-
-        # if multi and not cluster_name:
-        #     st.error('複数同時処理の場合はクラスタ名を入力してください。')
-        #     ok = False
-        # elif multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
-        #     st.error('半角英数のみで入力してください。')
-        #     ok = False
-
-        # ok = True
-        # if st.button('クラスタリングを実行', key='process_wsi'):
-        #     if ok:
-
-        #         if operation_index == 0:
-        #             # HDF5変換のみ
-        #             pass
-        #         elif operation_index > 0:
-        #             # 特徴量抽出
-        #             tp = TileProcessor(model_name='gigapath', device='cuda')
-        #             tp.evaluate_hdf5_file(hdf5_path, progress='streamlit')
-
-        #             if operation_index > 1:
-        #                 # HDF5変換+特徴量抽出+クラスタリング
-        #                 pass
-        #         st.write('処理完了')
+                img = Image.open(fig_path)
+                st.image(img)
+                # st.rerun()
 
     else:
         st.warning(f'Invalid mode: {mode}')

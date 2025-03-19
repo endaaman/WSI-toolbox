@@ -3,6 +3,7 @@ import logging
 
 from PIL import Image
 from PIL.Image import Image as ImageType
+from sklearn.decomposition import PCA
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
@@ -15,6 +16,16 @@ def yes_no_prompt(question):
     print(f"{question} [Y/n]: ", end="")
     response = input().lower()
     return response == "" or response.startswith("y")
+
+
+def find_optimal_components(features, threshold=0.95):
+    pca = PCA()
+    pca.fit(features)
+    explained_variance = pca.explained_variance_ratio_
+    # 累積寄与率が95%を超える次元数を選択する例
+    cumulative_variance = np.cumsum(explained_variance)
+    optimal_n = np.argmax(cumulative_variance >= threshold) + 1
+    return min(optimal_n, len(features) - 1)
 
 
 def hover_images_on_scatters(scatters, imagess, ax=None, offset=(150, 30)):
