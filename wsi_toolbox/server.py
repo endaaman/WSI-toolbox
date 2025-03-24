@@ -19,7 +19,7 @@ sys.path.append(str(Path(__file__).parent))
 __package__ = 'wsi_toolbox'
 
 from .utils.progress import tqdm_or_st
-from .processor import WSIProcessor, TileProcessor, ClusterProcessor
+from .processor import WSIProcessor, TileProcessor, ClusterProcessor, ThumbProcessor
 
 
 Image.MAX_IMAGE_PIXELS = 3_500_000_000
@@ -46,6 +46,7 @@ def get_hdf5_detail(hdf_path):
             return {
                 'supported': False,
                 'has_features': False,
+                'cluster_names': ['未施行'],
                 'patch_count': 0,
                 'mpp': 0,
                 'cols': 0,
@@ -53,9 +54,16 @@ def get_hdf5_detail(hdf_path):
             }
         patch_count = f['metadata/patch_count'][()]
         has_features = 'gigapath/features' in f and (len(f['gigapath/features']) == patch_count)
+        cluster_names = ['未施行']
+        if 'gigapath' in f:
+            cluster_names = [
+                k.replace('clusters_', '').replace('clusters', 'デフォルト')
+                for k in f['gigapath'].keys() if re.match(r'^clusters.*', k)
+            ]
         return {
             'supported': True,
             'has_features': has_features,
+            'cluster_names': cluster_names,
             'patch_count': patch_count,
             'mpp': f['metadata/mpp'][()],
             'cols': f['metadata/cols'][()],
@@ -286,6 +294,7 @@ def main():
                 column_config={
                     'name': 'ファイル名',
                     'has_features': '特徴量抽出状況',
+                    'cluster_names': 'クラスタリング処理状況',
                     'patch_count': 'パッチ数',
                     'mpp': 'micro/pixel',
                     'supported': None,
@@ -311,22 +320,38 @@ def main():
                     if not f['detail']['has_features']:
                         st.write(f'{f["name"]}の特徴量が未抽出なので、抽出を行います。')
                         st.write(f'特徴量抽出中...')
-                        tp = TileProcessor(model_name='gigapath', device='cuda')
-                        tp.evaluate_hdf5_file(f['path'], batch_size=256, progress='streamlit', overwrite=True)
+                        tile_proc = TileProcessor(model_name='gigapath', device='cuda')
+                        tile_proc.evaluate_hdf5_file(f['path'], batch_size=256, progress='streamlit', overwrite=True)
                         st.write('特徴量抽出完了。')
 
-                cp = ClusterProcessor(
+                cluster_proc = ClusterProcessor(
                         [f['path'] for f in selected_files],
                         model_name='gigapath',
                         cluster_name=cluster_name)
                 t = 'と'.join([f['name'] for f in selected_files])
-                with st.spinner(f'{t}をクラスタリング中...'):
-                    fig_path = cp.anlyze_clusters()
+                with st.spinner(f'{t}をクラスタリング中...', show_time=True):
+                    if multi:
+                        dir = os.path.dirname(selected_files[0]['path'])
+                        umap_path = f'{dir}/{cluster_name}.png'
+                    else:
+                        base, ext = os.path.splitext(selected_files[0]['path'])
+                        umap_path = f'{base}_umap.png'
+                    cluster_proc.anlyze_clusters(overwrite=False)
 
                 st.write('クラスタリング完了。')
-                img = Image.open(fig_path)
-                st.image(img)
-                # st.rerun()
+                st.image(Image.open(umap_path))
+
+                thumb_proc = ThumbProcessor(selected_files[0]['path'], cluster_name='', size=64)
+                with st.spinner('サムネイル生成中', show_time=True):
+                    if multi:
+                        dir = os.path.dirname(selected_files[0]['path'])
+                        thumb_path = f'{dir}/{cluster_name}.jpg'
+                    else:
+                        base, ext = os.path.splitext(selected_files[0]['path'])
+                        thumb_path = f'{base}_thumb.jpg'
+                    thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
+                st.write('サムネイル生成完了')
+                st.image(Image.open(thumb_path))
 
     else:
         st.warning(f'Invalid mode: {mode}')

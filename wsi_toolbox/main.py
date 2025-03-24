@@ -28,7 +28,7 @@ import timm
 from gigapath import slide_encoder
 
 from .processor import WSIProcessor, TileProcessor
-from .utils import hover_images_on_scatters, find_optimal_components
+from .utils import hover_images_on_scatters, find_optimal_components, create_frame, get_platform_font
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.progress import tqdm_or_st
 
@@ -40,33 +40,6 @@ warnings.filterwarnings('ignore', category=FutureWarning, message="You are using
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
-
-
-
-def get_platform_font():
-    if sys.platform == 'win32':
-        # Windows
-        font_path = 'C:\\Windows\\Fonts\\msgothic.ttc'  # MSゴシック
-    elif sys.platform == 'darwin':
-        # macOS
-        font_path = '/System/Library/Fonts/Supplemental/Arial.ttf'
-    else:
-        # Linux
-        # font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf' # TODO: propagation
-        font_path = '/usr/share/fonts/TTF/DejaVuSans.ttf'
-    return font_path
-
-
-def create_frame(size, color, text, font):
-    frame = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(frame)
-    draw.rectangle((0, 0, size, size), outline=color, width=4)
-    text_color = 'white' if mcolors.rgb_to_hsv(mcolors.hex2color(color))[2]<0.9 else 'black'
-    bbox = np.array(draw.textbbox((0, 0), text, font=font))
-    w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-    draw.rectangle((4, 4, bbox[2]+4, bbox[3]+4), fill=color)
-    draw.text((1, 1), text, font=font, fill=text_color)
-    return frame
 
 
 

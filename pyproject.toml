@@ -33,6 +33,7 @@ dependencies = [
     "scikit-learn>=1.6.1",
     "seaborn>=0.13.2",
     "streamlit>=1.43.2",
+    "streamlit-antd-components>=0.3.2",
     "taskipy>=1.14.1",
     "tifffile>=2025.2.18",
     "timm==0.9.16",

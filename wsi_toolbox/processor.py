@@ -1,7 +1,8 @@
 import os
 import gc
+import sys
 
-from PIL import Image
+from PIL import Image, ImageFont, ImageDraw
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt, colors as mcolors
@@ -19,7 +20,7 @@ import networkx as nx
 import leidenalg as la
 import igraph as ig
 
-from .utils import find_optimal_components
+from .utils import find_optimal_components, create_frame, get_platform_font
 from .utils.progress import tqdm_or_st
 
 
@@ -334,11 +335,20 @@ class ClusterProcessor:
         self.model_name = model_name
         self.cluster_name = cluster_name
 
-    def anlyze_clusters(self):
+        if self.multi:
+            self.clusters_path = f'{self.model_name}/clusters_{self.cluster_name}'
+        else:
+            self.clusters_path = f'{self.model_name}/clusters'
+
+    def anlyze_clusters(self, overwrite=False):
         features = []
         lengths = []
         for hdf5_path in self.hdf5_paths:
             with h5py.File(hdf5_path, 'r') as f:
+                if self.clusters_path in f:
+                    if not overwrite:
+                        print('Skip leiden clustering')
+                        return
                 patch_count = f['metadata/patch_count'][()]
                 features.append(f[f'{self.model_name}/features'][:])
                 lengths.append(patch_count)
@@ -408,18 +418,23 @@ class ClusterProcessor:
             cc = clusters[cursor:cursor+length]
             cursor += length
             with h5py.File(hdf5_path, 'a') as f:
-                if self.multi:
-                    path = f'{self.model_name}/clusters_{self.cluster_name}'
-                else:
-                    path = f'{self.model_name}/clusters'
-                if path in f:
-                    del f[path]
-                f.create_dataset(path, data=cc)
+                if self.clusters_path in f:
+                    del f[self.clusters_path]
+                f.create_dataset(self.clusters_path, data=cc)
+
+
+    def save_umap(self, fig_path):
+        clusters = []
+        for hdf5_path in self.hdf5_paths:
+            with h5py.File(hdf5_path, 'r') as f:
+                clusters.append(f[clusters_path][:])
+
+        clusters = np.concatenate(clusters)
+        cluster_ids = sorted(list(set(clusters)))
 
         fig, ax = plt.subplots(figsize=(10, 8))
         cmap = plt.get_cmap('tab20')
-        # colors = plt.cm.rainbow(np.linspace(0, 1, len(set(clusters))))
-        cluster_ids = sorted(list(set(clusters)))
+
         for i, cluster_id in enumerate(cluster_ids):
             coords = embedding[clusters == cluster_id]
             if cluster_id == -1:
@@ -450,14 +465,53 @@ class ClusterProcessor:
         plt.ylabel('UMAP Dimension 2')
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-
-        if self.multi:
-            # multiple
-            dir = os.path.dirname(self.hdf5_paths[0])
-            fig_path = f'{dir}/{self.cluster_name}.png'
-        else:
-            base, ext = os.path.splitext(self.hdf5_paths[0])
-            fig_path = f'{base}_umap.png'
         plt.savefig(fig_path)
         print(f'wrote {fig_path}')
         return fig_path
+
+
+class ThumbProcessor:
+    def __init__(self, hdf5_path, cluster_name='', size=64):
+        self.hdf5_path = hdf5_path
+        self.cluster_name = cluster_name
+        self.size = size
+
+    def create_thumbnail(self, output_path, progress='tqdm'):
+        S = self.size
+
+        cmap = plt.get_cmap('tab20')
+        with h5py.File(self.hdf5_path, 'r') as f:
+            cols = f['metadata/cols'][()]
+            rows = f['metadata/rows'][()]
+            patch_count = f['metadata/patch_count'][()]
+            patch_size = f['metadata/patch_size'][()]
+
+            clusters = []
+            cluster_path = 'gigapath/clusters'
+            if self.cluster_name:
+                cluster_path += f'_{self.cluster_name}'
+            clusters = f[cluster_path][:]
+
+            frames = {}
+            font = ImageFont.truetype(font=get_platform_font(), size=16)
+            for cluster in np.unique(clusters).tolist() + [-1]:
+                if cluster < 0:
+                    color = '#111'
+                else:
+                    color = mcolors.rgb2hex(cmap(cluster)[:3])
+                frames[cluster] = create_frame(S, color, f'{cluster}', font)
+
+            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
+            tq = tqdm_or_st(range(patch_count), backend=progress)
+            for i in tq:
+                coord = f['coordinates'][i]
+                x, y = coord//patch_size*S
+                patch = f['patches'][i]
+                patch = Image.fromarray(patch)
+                patch = patch.resize((S, S))
+                frame = frames[clusters[i]]
+                patch.paste(frame, (0, 0), frame)
+                canvas.paste(patch, (x, y, x+S, y+S))
+
+            canvas.save(output_path)
+            print(f'wrote {output_path}')
