@@ -66,7 +66,7 @@ requires-dist = ["torch", "einops"]
 
 [tool.taskipy.tasks]
 main = "python -m wsi_toolbox.main"
-server = "streamlit run wsi_toolbox/server.py"
+server = "streamlit run wsi_toolbox/server.py --server.address 0.0.0.0 --server.port 8501"
 
 [tool.hatch.build.targets.wheel]
 packages = ["wsi_toolbox"]
