@@ -35,7 +35,10 @@ def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
     #      )
     return white_ratio_calculated > white_ratio
 
-
+def cosine_distance(x, y):
+    distance = np.linalg.norm(x - y)
+    weight = np.exp(-distance / distance.mean())
+    return distance, weight
 
 class WSIFile:
     def __init__(self, path):
@@ -380,6 +383,7 @@ class ClusterProcessor:
     def anlyze_clusters(self, resolution=1.0, use_umap_embs=False, overwrite=True, progress='tqdm'):
         if np.any(self.clusters) and not overwrite:
             print('Skip clustering')
+            return
 
         n_components = find_optimal_components(self.scaled_features)
         print('Optimal n_components:', n_components)
@@ -394,14 +398,20 @@ class ClusterProcessor:
         n_samples = target_features.shape[0]
         G.add_nodes_from(range(n_samples))
 
-        # Add edges based on k-nearest neighbors
+        h = self.get_umap_embeddings() if use_umap_embs else target_features
         for i in tqdm_or_st(range(n_samples), backend=progress):
             for j in indices[i]:
                 if i == j: # skip self loop
                     continue
-                h = self.get_umap_embeddings() if use_umap_embs else target_features
-                distance = np.linalg.norm(h[i] - h[j])
-                weight = np.exp(-distance)
+                if use_umap_embs:
+                    distance = np.linalg.norm(h[i] - h[j])
+                    # weight = np.exp(-distance)
+                    weight = np.exp(-distance / distance.mean())
+                else:
+                    explained_variance_ratio = pca.explained_variance_ratio_
+                    weighted_diff = (h[i] - h[j]) * np.sqrt(explained_variance_ratio[:len(h[i])])
+                    distance = np.linalg.norm(weighted_diff)
+                    weight = np.exp(-distance / distance.mean())
                 G.add_edge(i, j, weight=weight)
 
         # Convert NetworkX graph to igraph for Leiden algorithm

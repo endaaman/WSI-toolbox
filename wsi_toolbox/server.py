@@ -275,10 +275,10 @@ def main():
                             selected_files[0]['path'],
                             model_name='gigapath',
                             cluster_name='')
-
-                    resolution = st.slider('クラスタリング解像度',
-                                           min_value=0.0, max_value=3.0,
-                                           value=1.0, step=0.1)
+                    resolution = 1.0
+                    # resolution = st.slider('クラスタリング解像度',
+                    #                        min_value=0.0, max_value=3.0,
+                    #                        value=1.0, step=0.1)
                     with st.spinner(f'クラスタリング中...', show_time=True):
                         cluster_proc.anlyze_clusters(resolution)
                     st.write('クラスタリング完了。')
@@ -322,9 +322,13 @@ def main():
                     st.error('複数同時処理の場合はクラスタ名を入力してください。')
                     ok = False
 
-            resolution = st.slider('クラスタリング解像度',
-                                   min_value=0.0, max_value=3.0,
-                                   value=1.0, step=0.1)
+            resolution = 1.0
+            # resolution = st.slider('クラスタリング解像度',
+            #                        min_value=0.0, max_value=3.0,
+            #                        value=1.0, step=0.1)
+            # overwrite = False
+            overwrite = st.checkbox('計算済みクラスタ結果を再度計算する', value=False)
+
             if ok and st.button('クラスタリングを実行', key='process_wsi'):
                 for f in selected_files:
                     if not f['detail']['has_features']:
@@ -346,24 +350,25 @@ def main():
                     else:
                         base, ext = os.path.splitext(selected_files[0]['path'])
                         umap_path = f'{base}_umap.png'
-                    cluster_proc.anlyze_clusters(resolution=resolution, overwrite=True,
-                                                 use_umap_embs=True, progress='streamlit')
+                    cluster_proc.anlyze_clusters(resolution=resolution, overwrite=overwrite,
+                                                 use_umap_embs=False, progress='streamlit')
                     cluster_proc.save_umap(umap_path)
 
                 st.write('クラスタリング完了。')
                 st.image(Image.open(umap_path))
 
-                thumb_proc = ThumbProcessor(selected_files[0]['path'], cluster_name='', size=64)
                 with st.spinner('サムネイル生成中', show_time=True):
-                    if multi:
-                        dir = os.path.dirname(selected_files[0]['path'])
-                        thumb_path = f'{dir}/{cluster_name}.jpg'
-                    else:
-                        base, ext = os.path.splitext(selected_files[0]['path'])
-                        thumb_path = f'{base}_thumb.jpg'
-                    thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
-                st.write('サムネイル生成完了')
-                st.image(Image.open(thumb_path))
+                    for file in selected_files:
+                        thumb_proc = ThumbProcessor(file['path'], cluster_name=cluster_name, size=64)
+                        base, ext = os.path.splitext(file['path'])
+                        if multi:
+                            thumb_path = f'{base}_thumb_{cluster_name}.jpg'
+                        else:
+                            thumb_path = f'{base}_thumb.jpg'
+                        thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
+                        st.write(thumb_path)
+                        st.image(Image.open(thumb_path))
+                    st.write('サムネイル生成完了')
 
     else:
         st.warning(f'Invalid mode: {mode}')
