@@ -340,57 +340,85 @@ class ClusterProcessor:
         else:
             self.clusters_path = f'{self.model_name}/clusters'
 
-    def anlyze_clusters(self, overwrite=False):
         features = []
         lengths = []
+        clusters = []
         for hdf5_path in self.hdf5_paths:
             with h5py.File(hdf5_path, 'r') as f:
-                if self.clusters_path in f:
-                    if not overwrite:
-                        print('Skip leiden clustering')
-                        return
                 patch_count = f['metadata/patch_count'][()]
-                features.append(f[f'{self.model_name}/features'][:])
                 lengths.append(patch_count)
+                features.append(f[f'{self.model_name}/features'][:])
+                if self.clusters_path in f:
+                    clusters.append(f[self.clusters_path][:])
 
+        self.lengths = lengths
         features = np.concatenate(features)
         scaler = StandardScaler()
-        scaled_features = scaler.fit_transform(features)
+        self.scaled_features = scaler.fit_transform(features)
 
-        n_components = find_optimal_components(scaled_features)
+        self.clusters = np.concatenate(clusters) if len(clusters)>0 else None
+
+        self._umap_embeddings = None
+
+    def get_umap_embeddings(self):
+        if np.any(self._umap_embeddings):
+            return self._umap_embeddings
+
+        print('UMAP fitting...')
+        reducer = umap.UMAP(
+                # n_neighbors=30,
+                # min_dist=0.05,
+                n_components=2,
+                # random_state=a.seed
+            )
+        embs = reducer.fit_transform(self.scaled_features)
+        print('UMAP done')
+        self._umap_embeddings = embs
+        return embs
+
+
+    def anlyze_clusters(self, resolution=1.0, use_umap_embs=False, overwrite=True, progress='tqdm'):
+        if np.any(self.clusters) and not overwrite:
+            print('Skip clustering')
+
+        n_components = find_optimal_components(self.scaled_features)
         print('Optimal n_components:', n_components)
         pca = PCA(n_components)
-        target_features = pca.fit_transform(scaled_features)
+        target_features = pca.fit_transform(self.scaled_features)
 
         k = int(np.sqrt(len(target_features)))
         nn = NearestNeighbors(n_neighbors=k).fit(target_features)
         distances, indices = nn.kneighbors(target_features)
 
         G = nx.Graph()
-        n_samples = features.shape[0]
+        n_samples = target_features.shape[0]
         G.add_nodes_from(range(n_samples))
 
         # Add edges based on k-nearest neighbors
-        for i in range(n_samples):
+        for i in tqdm_or_st(range(n_samples), backend=progress):
             for j in indices[i]:
-                if i != j:  # Avoid self-loops
-                    # Add edge weight based on distance (closer points have higher weights)
-                    distance = np.linalg.norm(target_features[i] - target_features[j])
-                    weight = np.exp(-distance)  # Convert distance to similarity
-                    G.add_edge(i, j, weight=weight)
+                if i == j: # skip self loop
+                    continue
+                h = self.get_umap_embeddings() if use_umap_embs else target_features
+                distance = np.linalg.norm(h[i] - h[j])
+                weight = np.exp(-distance)
+                G.add_edge(i, j, weight=weight)
 
         # Convert NetworkX graph to igraph for Leiden algorithm
         edges = list(G.edges())
         weights = [G[u][v]['weight'] for u, v in edges]
         ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
 
+        print('Starting leiden clustering...')
         partition = la.find_partition(
             ig_graph,
             la.RBConfigurationVertexPartition,
             weights='weight',
-            resolution_parameter=1.0, # maybe most adaptive
+            resolution_parameter=resolution, # maybe most adaptive
+            # resolution_parameter=1.0, # maybe most adaptive
             # resolution_parameter=0.5, # more coarse cluster
         )
+        print('leiden clustering done')
 
         # Convert partition result to cluster assignments
         clusters = np.full(n_samples, -1)  # Initialize all as noise
@@ -404,7 +432,7 @@ class ClusterProcessor:
         # print('n_noise', n_noise)
 
         cursor = 0
-        for hdf5_path, length in zip(self.hdf5_paths, lengths):
+        for hdf5_path, length in zip(self.hdf5_paths, self.lengths):
             cc = clusters[cursor:cursor+length]
             cursor += length
             with h5py.File(hdf5_path, 'a') as f:
@@ -412,37 +440,21 @@ class ClusterProcessor:
                     del f[self.clusters_path]
                 f.create_dataset(self.clusters_path, data=cc)
 
+        self.clusters = clusters
+
 
     def save_umap(self, fig_path):
-        clusters = []
-        features = []
-        for hdf5_path in self.hdf5_paths:
-            with h5py.File(hdf5_path, 'r') as f:
-                clusters.append(f[self.clusters_path][:])
-                features.append(f[f'{self.model_name}/features'][:])
-
-        features = np.concatenate(features)
-        scaler = StandardScaler()
-        scaled_features = scaler.fit_transform(features)
-
-        clusters = np.concatenate(clusters)
+        if not np.any(self.clusters):
+            raise RuntimeError('Compute clusters before umap projection.')
+        clusters = self.clusters
         cluster_ids = sorted(list(set(clusters)))
 
-        print('UMAP fitting...')
-        reducer = umap.UMAP(
-                # n_neighbors=30,
-                # min_dist=0.05,
-                n_components=2,
-                # random_state=a.seed
-            )
-        embedding = reducer.fit_transform(scaled_features)
-        print('UMAP done')
-
+        umap_embeddings = self.get_umap_embeddings()
         fig, ax = plt.subplots(figsize=(10, 8))
         cmap = plt.get_cmap('tab20')
 
         for i, cluster_id in enumerate(cluster_ids):
-            coords = embedding[clusters == cluster_id]
+            coords = umap_embeddings[clusters == cluster_id]
             if cluster_id == -1:
                 color = 'black'
                 label = 'Noise'
@@ -456,7 +468,7 @@ class ClusterProcessor:
         for cluster_id in cluster_ids:
             if cluster_id < 0:
                 continue
-            cluster_points = embedding[clusters == cluster_id]
+            cluster_points = umap_embeddings[clusters == cluster_id]
             if len(cluster_points) < 1:
                 continue
             centroid_x = np.mean(cluster_points[:, 0])
@@ -471,7 +483,8 @@ class ClusterProcessor:
         plt.ylabel('UMAP Dimension 2')
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-        plt.savefig(fig_path)
+        # plt.savefig(fig_path)
+        plt.savefig(fig_path, bbox_inches='tight', pad_inches=0.5)
         print(f'wrote {fig_path}')
         return fig_path
 

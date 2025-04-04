@@ -275,8 +275,12 @@ def main():
                             selected_files[0]['path'],
                             model_name='gigapath',
                             cluster_name='')
+
+                    resolution = st.slider('クラスタリング解像度',
+                                           min_value=0.0, max_value=3.0,
+                                           value=1.0, step=0.1)
                     with st.spinner(f'クラスタリング中...', show_time=True):
-                        cluster_proc.anlyze_clusters(overwrite=False)
+                        cluster_proc.anlyze_clusters(resolution)
                     st.write('クラスタリング完了。')
                     base, ext = os.path.splitext(selected_files[0]['path'])
                     umap_path = f'{base}_umap.png'
@@ -318,6 +322,9 @@ def main():
                     st.error('複数同時処理の場合はクラスタ名を入力してください。')
                     ok = False
 
+            resolution = st.slider('クラスタリング解像度',
+                                   min_value=0.0, max_value=3.0,
+                                   value=1.0, step=0.1)
             if ok and st.button('クラスタリングを実行', key='process_wsi'):
                 for f in selected_files:
                     if not f['detail']['has_features']:
@@ -339,7 +346,8 @@ def main():
                     else:
                         base, ext = os.path.splitext(selected_files[0]['path'])
                         umap_path = f'{base}_umap.png'
-                    cluster_proc.anlyze_clusters(overwrite=False)
+                    cluster_proc.anlyze_clusters(resolution=resolution, overwrite=True,
+                                                 use_umap_embs=True, progress='streamlit')
                     cluster_proc.save_umap(umap_path)
 
                 st.write('クラスタリング完了。')
