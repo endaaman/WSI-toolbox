@@ -271,14 +271,17 @@ def main():
                 st.write('※クラスタリングも実行する場合はHDF5から選択してください。')
             else:
                 if do_clustering:
-                    cp = ClusterProcessor(
+                    cluster_proc = ClusterProcessor(
                             selected_files[0]['path'],
                             model_name='gigapath',
                             cluster_name='')
-                    with st.spinner(f'クラスタリング中...'):
-                        fig_path = cp.anlyze_clusters()
+                    with st.spinner(f'クラスタリング中...', show_time=True):
+                        cluster_proc.anlyze_clusters(overwrite=False)
                     st.write('クラスタリング完了。')
-                    img = Image.open(fig_path)
+                    base, ext = os.path.splitext(selected_files[0]['path'])
+                    umap_path = f'{base}_umap.png'
+                    cluster_proc.save_umap(umap_path)
+                    img = Image.open(umap_path)
                     st.image(img)
                 st.write('すべての処理が完了しました。')
 
@@ -337,6 +340,7 @@ def main():
                         base, ext = os.path.splitext(selected_files[0]['path'])
                         umap_path = f'{base}_umap.png'
                     cluster_proc.anlyze_clusters(overwrite=False)
+                    cluster_proc.save_umap(umap_path)
 
                 st.write('クラスタリング完了。')
                 st.image(Image.open(umap_path))

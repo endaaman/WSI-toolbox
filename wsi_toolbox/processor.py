@@ -357,16 +357,6 @@ class ClusterProcessor:
         scaler = StandardScaler()
         scaled_features = scaler.fit_transform(features)
 
-        print('UMAP fitting...')
-        reducer = umap.UMAP(
-                # n_neighbors=30,
-                # min_dist=0.05,
-                n_components=2,
-                # random_state=a.seed
-            )
-        embedding = reducer.fit_transform(scaled_features)
-        print('UMAP done')
-
         n_components = find_optimal_components(scaled_features)
         print('Optimal n_components:', n_components)
         pca = PCA(n_components)
@@ -377,7 +367,7 @@ class ClusterProcessor:
         distances, indices = nn.kneighbors(target_features)
 
         G = nx.Graph()
-        n_samples = embedding.shape[0]
+        n_samples = features.shape[0]
         G.add_nodes_from(range(n_samples))
 
         # Add edges based on k-nearest neighbors
@@ -385,7 +375,7 @@ class ClusterProcessor:
             for j in indices[i]:
                 if i != j:  # Avoid self-loops
                     # Add edge weight based on distance (closer points have higher weights)
-                    distance = np.linalg.norm(embedding[i] - embedding[j])
+                    distance = np.linalg.norm(target_features[i] - target_features[j])
                     weight = np.exp(-distance)  # Convert distance to similarity
                     G.add_edge(i, j, weight=weight)
 
@@ -425,12 +415,28 @@ class ClusterProcessor:
 
     def save_umap(self, fig_path):
         clusters = []
+        features = []
         for hdf5_path in self.hdf5_paths:
             with h5py.File(hdf5_path, 'r') as f:
-                clusters.append(f[clusters_path][:])
+                clusters.append(f[self.clusters_path][:])
+                features.append(f[f'{self.model_name}/features'][:])
+
+        features = np.concatenate(features)
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
 
         clusters = np.concatenate(clusters)
         cluster_ids = sorted(list(set(clusters)))
+
+        print('UMAP fitting...')
+        reducer = umap.UMAP(
+                # n_neighbors=30,
+                # min_dist=0.05,
+                n_components=2,
+                # random_state=a.seed
+            )
+        embedding = reducer.fit_transform(scaled_features)
+        print('UMAP done')
 
         fig, ax = plt.subplots(figsize=(10, 8))
         cmap = plt.get_cmap('tab20')
