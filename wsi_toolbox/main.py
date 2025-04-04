@@ -362,7 +362,8 @@ class CLI(BaseMLCLI):
                 for j in indices[i]:
                     if i != j:  # Avoid self-loops
                         # Add edge weight based on distance (closer points have higher weights)
-                        distance = np.linalg.norm(embedding[i] - embedding[j])
+                        # distance = np.linalg.norm(embedding[i] - embedding[j])
+                        distance = np.linalg.norm(target_features[i] - target_features[j])
                         weight = np.exp(-distance)  # Convert distance to similarity
                         G.add_edge(i, j, weight=weight)
 
