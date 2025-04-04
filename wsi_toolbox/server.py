@@ -160,15 +160,15 @@ def format_size(size_bytes):
         return f"{size_bytes/(1024*1024*1024):.1f} GB"
 
 
-DEFAULT_ROOT = 'data'
+BASE_DIR = os.getenv('BASE_DIR', 'data')
 
 def main():
     st.title('WSI AI解析システム')
 
     if 'current_dir' not in st.session_state:
-        st.session_state.current_dir = DEFAULT_ROOT
+        st.session_state.current_dir = BASE_DIR
 
-    default_root_abs = os.path.abspath(DEFAULT_ROOT)
+    default_root_abs = os.path.abspath(BASE_DIR)
     current_dir_abs = os.path.abspath(st.session_state.current_dir)
 
     cols = st.columns([0.1, 0.1])
