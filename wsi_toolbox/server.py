@@ -219,7 +219,6 @@ def main():
         disabled=['name', 'type', 'size', 'modified'],
     )
 
-    # selected_files = edited_df[edited_df['selected'] == True].to_dict('records')
     selected_indices = edited_df[edited_df['selected'] == True].index.tolist()
     selected_files = [files[i] for i in selected_indices]
 
@@ -244,49 +243,45 @@ def main():
             st.image(img)
     elif mode == 'WSI':
         st.subheader('HDF5に変換し特徴量を抽出する')
-        st.write('変換と特徴量抽出の2ステップを実行します。どちらも結構時間がかかります。')
+        st.write('変換と特徴量抽出の2ステップを実行します。それぞれ5分、20分程度かかります。')
 
         do_clustering = st.checkbox(
-            'クラスタリングも実行する(クラスタリングも同時に行うには一つだけ選択してください。)',
+            'クラスタリングも実行する',
             disabled=multi, value=not multi)
 
         if st.button('処理を実行', key='process_wsi'):
-            wsi_path = selected_files[0]['path']
-            basename = os.path.splitext(wsi_path)[0]
-            hdf5_path = f'{basename}.h5'
-            hdf5_tmp_path = f'{basename}.h5.tmp'
-            wp = WSIProcessor(wsi_path)
-            with st.spinner('HDF5ファイルに変換中...', show_time=True):
-                wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
-            os.rename(hdf5_tmp_path, hdf5_path)
-            st.write('HDF5ファイルに変換完了。')
+            for f in selected_files:
+                st.write(f'処理ファイル: {f["name"]}')
+                wsi_path = f['path']
+                base = os.path.splitext(wsi_path)[0]
+                hdf5_path = f'{base}.h5'
+                hdf5_tmp_path = f'{base}.h5.tmp'
+                wp = WSIProcessor(wsi_path)
+                if os.path.exists(hdf5_path):
+                    st.write(f'すでにHDF5ファイル（{os.path.basename(hdf5_path)}）が存在しているの処理をスキップしました。')
+                else:
+                    with st.spinner('HDF5ファイルに変換中...', show_time=True):
+                        wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
+                    os.rename(hdf5_tmp_path, hdf5_path)
+                    st.write('HDF5ファイルに変換完了。')
 
-            tp = TileProcessor(model_name='gigapath', device='cuda')
-            with st.spinner('特徴量抽出中...', show_time=True):
-                tp.evaluate_hdf5_file(hdf5_path, batch_size=256, progress='streamlit', overwrite=True)
-            st.write('特徴量抽出完了。')
+                tp = TileProcessor(model_name='gigapath', device='cuda')
+                with st.spinner('特徴量抽出中...', show_time=True):
+                    tp.evaluate_hdf5_file(hdf5_path, batch_size=256, progress='streamlit', overwrite=True)
+                st.write('特徴量抽出完了。')
 
-            if multi:
-                st.write('すべての処理が完了しました。')
-                st.write('※クラスタリングも実行する場合はHDF5から選択してください。')
-            else:
-                if do_clustering:
+            if do_clustering:
+                for f in selected_files:
                     cluster_proc = ClusterProcessor(
                             [selected_files[0]['path']],
                             model_name='gigapath',
                             cluster_name='')
-                    resolution = 1.0
-                    # resolution = st.slider('クラスタリング解像度',
-                    #                        min_value=0.0, max_value=3.0,
-                    #                        value=1.0, step=0.1)
                     with st.spinner(f'クラスタリング中...', show_time=True):
-                        cluster_proc.anlyze_clusters(resolution)
+                        cluster_proc.anlyze_clusters(resolution=1.0)
                     st.write('クラスタリング完了。')
                     base, ext = os.path.splitext(selected_files[0]['path'])
                     umap_path = f'{base}_umap.png'
                     cluster_proc.save_umap(umap_path)
-                    img = Image.open(umap_path)
-                    st.image(img)
                 st.write('すべての処理が完了しました。')
 
     elif mode == 'HDF5':

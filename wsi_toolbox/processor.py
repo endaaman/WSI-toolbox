@@ -252,7 +252,7 @@ class TileProcessor:
         self.device = device
         self.target_name = f'{model_name}/features'
 
-    def evaluate_hdf5_file(self, hdf5_path, progress='tqdm', batch_size=256, overwrite=True):
+    def evaluate_hdf5_file(self, hdf5_path, batch_size=256, overwrite=False, progress='tqdm'):
         if self.model_name == 'uni':
             model = timm.create_model('hf-hub:MahmoodLab/uni',
                                       pretrained=True,
@@ -380,7 +380,7 @@ class ClusterProcessor:
         return embs
 
 
-    def anlyze_clusters(self, resolution=1.0, use_umap_embs=False, overwrite=True, progress='tqdm'):
+    def anlyze_clusters(self, resolution=1.0, use_umap_embs=False, overwrite=False, progress='tqdm'):
         if np.any(self.clusters) and not overwrite:
             print('Skip clustering')
             return

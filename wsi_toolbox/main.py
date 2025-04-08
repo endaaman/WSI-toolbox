@@ -51,24 +51,29 @@ class CLI(BaseMLCLI):
 
     class Wsi2h5Args(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
-        output_path: str = Field(..., l='--out', s='-o')
+        output_path: str = Field('', l='--out', s='-o')
         patch_size: int = 256
         overwrite: bool = False
         engine: str = Field('auto', choices=['auto', 'openslide', 'tifffile'])
 
     def run_wsi2h5(self, a):
-        if os.path.exists(a.output_path):
-            if not a.overwrite:
-                print(f'{a.output_path} exists. Skipping.')
-                return
-            print(f'{a.output_path} exists but overwriting it.')
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(input_path)
+            output_path = base + '.h5'
 
-        d = os.path.dirname(a.output_path)
+        if os.path.exists(output_path):
+            if not a.overwrite:
+                print(f'{output_path} exists. Skipping.')
+                return
+            print(f'{output_path} exists but overwriting it.')
+
+        d = os.path.dirname(output_path)
         if d:
             os.makedirs(d, exist_ok=True)
 
         p = WSIProcessor(a.input_path, engine=a.engine)
-        p.convert_to_hdf5(a.output_path, patch_size=a.patch_size, progress='tqdm')
+        p.convert_to_hdf5(output_path, patch_size=a.patch_size, progress='tqdm')
 
         print('done')
 
