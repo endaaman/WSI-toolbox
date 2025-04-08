@@ -272,7 +272,7 @@ def main():
             else:
                 if do_clustering:
                     cluster_proc = ClusterProcessor(
-                            selected_files[0]['path'],
+                            [selected_files[0]['path']],
                             model_name='gigapath',
                             cluster_name='')
                     resolution = 1.0
@@ -328,6 +328,7 @@ def main():
             #                        value=1.0, step=0.1)
             # overwrite = False
             overwrite = st.checkbox('計算済みクラスタ結果を再度計算する', value=False)
+            use_umap_embs = st.checkbox('ノード間距離計算にUMAPの埋め込みを使用する', value=False)
 
             if ok and st.button('クラスタリングを実行', key='process_wsi'):
                 for f in selected_files:
@@ -351,7 +352,7 @@ def main():
                         base, ext = os.path.splitext(selected_files[0]['path'])
                         umap_path = f'{base}_umap.png'
                     cluster_proc.anlyze_clusters(resolution=resolution, overwrite=overwrite,
-                                                 use_umap_embs=False, progress='streamlit')
+                                                 use_umap_embs=use_umap_embs, progress='streamlit')
                     cluster_proc.save_umap(umap_path)
 
                 st.write('クラスタリング完了。')
