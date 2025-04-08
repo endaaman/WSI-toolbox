@@ -385,22 +385,29 @@ class ClusterProcessor:
             print('Skip clustering')
             return
 
+        n_samples = self.scaled_features.shape[0]
+        tq = tqdm_or_st(total=n_samples+3, backend=progress)
+
+        tq.set_description(f'Processing PCA...')
         n_components = find_optimal_components(self.scaled_features)
         print('Optimal n_components:', n_components)
         pca = PCA(n_components)
         target_features = pca.fit_transform(self.scaled_features)
+        tq.update(1)
 
+        tq.set_description(f'Processing KNN')
         k = int(np.sqrt(len(target_features)))
         nn = NearestNeighbors(n_neighbors=k).fit(target_features)
         distances, indices = nn.kneighbors(target_features)
+        tq.update(1)
 
         G = nx.Graph()
-        n_samples = target_features.shape[0]
         G.add_nodes_from(range(n_samples))
 
         h = self.get_umap_embeddings() if use_umap_embs else target_features
         print('umap_embeddings', use_umap_embs)
-        for i in tqdm_or_st(range(n_samples), backend=progress):
+        tq.set_description(f'Processing edges...')
+        for i in range(n_samples):
             for j in indices[i]:
                 if i == j: # skip self loop
                     continue
@@ -413,8 +420,9 @@ class ClusterProcessor:
                     distance = np.linalg.norm(weighted_diff)
                     weight = np.exp(-distance / distance.mean())
                 G.add_edge(i, j, weight=weight)
+            tq.update(1)
 
-        # Convert NetworkX graph to igraph for Leiden algorithm
+        tq.set_description(f'Leiden clustering...')
         edges = list(G.edges())
         weights = [G[u][v]['weight'] for u, v in edges]
         ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
@@ -428,6 +436,8 @@ class ClusterProcessor:
             # resolution_parameter=1.0, # maybe most adaptive
             # resolution_parameter=0.5, # more coarse cluster
         )
+        tq.update(1)
+        tq.close()
         print('leiden clustering done')
 
         # Convert partition result to cluster assignments

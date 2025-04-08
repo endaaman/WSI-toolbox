@@ -25,7 +25,7 @@ class StreamlitProgress:
             # 後置テキスト用のコンテナ
             self.postfix_container = st.empty()
         except ImportError:
-            raise ImportError("streamlitがインストールされていません。pip install streamlitでインストールしてください。")
+            raise ImportError("streamlitがインストールされていません。")
 
     def update(self, n: int = 1) -> None:
         """進捗を更新する"""
@@ -37,7 +37,9 @@ class StreamlitProgress:
         """説明テキストを更新する"""
         if desc is not None:
             self.desc = desc
-            self.text_container.text(desc)
+            # self.text_container.text(desc)
+            self.text_container.markdown('<p style="font-size:14px; color:gray;">' + desc +'</p>', unsafe_allow_html=True)
+
 
     def set_postfix(self, ordered_dict=None, **kwargs) -> None:
         """後置テキストを設定する"""
@@ -57,6 +59,7 @@ class StreamlitProgress:
         """プログレスバーを完了状態にする"""
         if self.total:
             self.progress_bar.progress(1.0)
+        self.text_container.empty()
 
     def refresh(self):
         """ 不要なので何もしない """

@@ -474,7 +474,8 @@ class CLI(BaseMLCLI):
 
     class ClusterScoresArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
-        targets: list[int] = Field(..., s='-T')
+        name: str = Field(...)
+        target_clusters: list[int] = Field(..., s='-T')
         model: str = Field('gigapath', l='--cluster', s='-C', choice=['gigapath', 'uni', 'unified', 'none'])
         scaler: str = Field('minmax', choices=['std', 'minmax'])
 
@@ -482,7 +483,7 @@ class CLI(BaseMLCLI):
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
             clusters = f[f'{a.model}/clusters'][:]
-            mask = np.isin(clusters, a.targets)
+            mask = np.isin(clusters, a.target_clusters)
             masked_clusters = clusters[mask]
             masked_features = f[f'{a.model}/features'][mask]
 
@@ -502,7 +503,7 @@ class CLI(BaseMLCLI):
         data = []
         labels = []
 
-        for target in a.targets:
+        for target in a.target_clusters:
             cluster_values = values[masked_clusters == target].flatten()
             data.append(cluster_values)
             labels.append(f'Cluster {target}')
@@ -524,15 +525,15 @@ class CLI(BaseMLCLI):
         plt.tight_layout()
         plt.show()
 
-        with h5py.File(a.input_path, 'a') as f:
-            path = f'{a.model}/scores'
-            if path in f:
-                del f[path]
-                print(f'Deleted {path}')
-            vv = np.full(patch_count, -1, dtype=values.dtype)
-            vv[mask] = values[:, 0]
-            f[path] = vv
-            print(f'Wrote {path} in {a.input_path}')
+        # with h5py.File(a.input_path, 'a') as f:
+        #     path = f'{a.model}/scores'
+        #     if path in f:
+        #         del f[path]
+        #         print(f'Deleted {path}')
+        #     vv = np.full(patch_count, -1, dtype=values.dtype)
+        #     vv[mask] = values[:, 0]
+        #     f[path] = vv
+        #     print(f'Wrote {path} in {a.input_path}')
 
 
     class AlignKeysArgs(CommonArgs):
