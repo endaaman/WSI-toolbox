@@ -2,7 +2,6 @@ import re
 import time
 import os
 from pathlib import Path
-import time
 import sys
 import warnings
 
@@ -19,6 +18,7 @@ sys.path.append(str(Path(__file__).parent))
 __package__ = 'wsi_toolbox'
 
 from .utils.progress import tqdm_or_st
+from .utils.st import st_horizontal
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, ThumbProcessor
 
 
@@ -41,7 +41,7 @@ def add_beforeunload_js():
     st.components.v1.html(js, height=0)
 
 def set_locked_state(is_locked):
-    print('Lock', is_locked)
+    print('locked', is_locked)
     st.session_state.locked = is_locked
     js = f"""
     <script>
@@ -61,11 +61,6 @@ st.set_page_config(
     page_icon='🔬',
     layout='wide'
 )
-
-if 'locked' not in st.session_state:
-    print('init')
-    set_locked_state(False)
-
 
 STATUS_READY = 0
 STATUS_BLOCKED = 1
@@ -159,24 +154,24 @@ def list_files(directory):
                 size_str = f'{size} bytes'
 
             files.append({
-                "selected": False,
-                "name": f'{item} {icon}',
-                "path": item_path,
-                "type": file_type,
-                "size": size_str,
-                "modified": time.ctime(os.path.getmtime(item_path)),
-                "detail": detail,
+                'selected': False,
+                'name': f'{item} {icon}',
+                'path': item_path,
+                'type': file_type,
+                'size': size_str,
+                'modified': pd.to_datetime(os.path.getmtime(item_path), unit='s'),
+                'detail': detail,
             })
 
         elif os.path.isdir(item_path):
             directories.append({
-                "selected": False,
-                "name": f"📁 {item}",
-                "path": item_path,
-                "type": "Directory",
-                "size": "",
-                "modified": time.ctime(os.path.getmtime(item_path)),
-                "detail": None,
+                'selected': False,
+                'name': f'📁 {item}',
+                'path': item_path,
+                'type': 'Directory',
+                'size': '',
+                'modified': pd.to_datetime(os.path.getmtime(item_path), unit='s'),
+                'detail': None,
             })
 
     all_items = directories + files
@@ -198,21 +193,24 @@ def get_mode_and_multi(selected_files):
 
 
 def format_size(size_bytes):
-    return 'AA'
     if size_bytes < 1024:
-        return f"{size_bytes} B"
+        return f'{size_bytes} B'
     elif size_bytes < 1024 * 1024:
-        return f"{size_bytes/1024:.1f} KB"
+        return f'{size_bytes/1024:.1f} KB'
     elif size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes/(1024*1024):.1f} MB"
+        return f'{size_bytes/(1024*1024):.1f} MB'
     else:
-        return f"{size_bytes/(1024*1024*1024):.1f} GB"
+        return f'{size_bytes/(1024*1024*1024):.1f} GB'
 
 
 BASE_DIR = os.getenv('BASE_DIR', 'data')
 
 def main():
     add_beforeunload_js()
+
+    if 'locked' not in st.session_state:
+        set_locked_state(False)
+
     st.title('ロビえもんNEXT - WSI AI解析システム')
 
     if 'current_dir' not in st.session_state:
@@ -221,8 +219,7 @@ def main():
     default_root_abs = os.path.abspath(BASE_DIR)
     current_dir_abs = os.path.abspath(st.session_state.current_dir)
 
-    cols = st.columns([0.1, 0.1])
-    with cols[0]:
+    with st_horizontal():
         if current_dir_abs == default_root_abs:
             st.button('↑ 親フォルダへ', disabled=True)
         else:
@@ -231,8 +228,6 @@ def main():
                 if os.path.commonpath([default_root_abs]) == os.path.commonpath([default_root_abs, parent_dir]):
                     st.session_state.current_dir = parent_dir
                     st.rerun()
-
-    with cols[1]:
         if st.button('フォルダ更新', disabled=st.session_state.locked):
             st.rerun()
 
@@ -246,19 +241,18 @@ def main():
     edited_df = st.data_editor(
         df,
         column_config={
-            "選択": st.column_config.CheckboxColumn(
-                "選択",
-                help="アイテムを選択",
-                default=False,
+            'selected': st.column_config.CheckboxColumn(
+                '選択',
+                help='アイテムを選択',
                 # disabled=st.session_state.locked,
             ),
             'name': 'ファイル名',
             'type': '種別',
             'size': 'ファイルサイズ',
-            # 'modified': st.column_config.DateColumn(
-            #     'Birthday',
-            #     format='YYYY/MM/DD hh:mm:ss',
-            # ),
+            'modified': st.column_config.DateColumn(
+                '最終変更',
+                format='YYYY/MM/DD hh:mm:ss',
+            ),
             'path': None,
             'detail': None,
         },
@@ -267,8 +261,9 @@ def main():
         # disabled=['name', 'type', 'size', 'modified'],
         disabled=st.session_state.locked,
     )
-
     selected_indices = edited_df[edited_df['selected'] == True].index.tolist()
+    # print('selected', selected_indices)
+    # st.session_state.selected_indices = selected_indices
     selected_files = [files[i] for i in selected_indices]
 
     mode, multi = get_mode_and_multi(selected_files)
@@ -315,16 +310,18 @@ def main():
             img = Image.open(f['path'])
             st.image(img)
     elif mode == 'WSI':
-        st.subheader('HDF5に変換し特徴量を抽出する', divider=True)
-        st.write('変換と特徴量抽出の2ステップを実行します。それぞれ5分、20分程度かかります。')
+        st.subheader('WSIをパッチ分割し特徴量を抽出する', divider=True)
+        st.write('分割したパッチをHDF5に保存し、GigaPath特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
 
         do_clustering = st.checkbox('クラスタリングも実行する', value=True, disabled=st.session_state.locked)
 
         hdf5_paths = []
         if st.button('処理を実行', disabled=st.session_state.locked, on_click=lock):
+            set_locked_state(True)
+            st.write(f'WSIから画像をパッチ分割しHDF5ファイルを構築します。')
             with st.container(border=True):
                 for i, f in enumerate(selected_files):
-                    st.write(f'**[{i+1}/{len(selected_files)}] 処理WSIファイル: {f["name"]}**')
+                    st.write(f'**[{i+1}/{len(selected_files)}] 処理中のWSIファイル: {f["name"]}**')
                     wsi_path = f['path']
                     base = os.path.splitext(wsi_path)[0]
                     hdf5_path = f'{base}.h5'
@@ -332,51 +329,51 @@ def main():
                     hdf5_tmp_path = f'{base}.h5.tmp'
                     matched_h5_entry = df[df['path'] == hdf5_path]
                     matched_h5_entry = matched_h5_entry.iloc[0] if np.any(matched_h5_entry) else None
-                    print(matched_h5_entry)
-                    print(matched_h5_entry['detail'])
                     if np.any(matched_h5_entry) and matched_h5_entry['detail']['status'] == STATUS_READY:
                         st.write(f'すでにHDF5ファイル（{os.path.basename(hdf5_path)}）が存在しているので分割処理をスキップしました。')
                     else:
-                        wp = WSIProcessor(wsi_path)
-                        with st.spinner('WSIを分割しHDF5ファイルを構成中...', show_time=True):
+                        with st.spinner('WSIを分割しHDF5ファイルを構成しています...', show_time=True):
+                            wp = WSIProcessor(wsi_path)
                             wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
                         os.rename(hdf5_tmp_path, hdf5_path)
                         st.write('HDF5ファイルに変換完了。')
                     if np.any(matched_h5_entry) and matched_h5_entry['detail']['has_features']:
-                        st.write(f'すでにHDF5ファイル（{os.path.basename(hdf5_path)}）に特徴量抽出済みです。')
+                        st.write(f'すでにGigaPath特徴量を抽出済みなので処理をスキップしました。')
                     else:
-                        tp = TileProcessor(model_name='gigapath', device='cuda')
                         with st.spinner('GigaPath特徴量を抽出中...', show_time=True):
+                            tp = TileProcessor(model_name='gigapath', device='cuda')
                             tp.evaluate_hdf5_file(hdf5_path, batch_size=256, overwrite=True, progress='streamlit')
                         st.write('GigaPath特徴量の抽出完了。')
                     if i < len(selected_files)-1:
                         st.divider()
 
-            st.write('クラスタリングを開始します。')
             if do_clustering:
-                for f, hdf5_path in zip(selected_files, hdf5_paths):
-                    with st.container(border=True):
+                st.write(f'クラスタリングを行います。')
+                with st.container(border=True):
+                    for i, (f, hdf5_path) in enumerate(zip(selected_files, hdf5_paths)):
                         st.write(f'**[{i}/{len(selected_files)}] 処理ファイル: {f["name"]}**')
                         base, ext = os.path.splitext(f['path'])
                         umap_path = f'{base}_umap.png'
                         thumb_path = f'{base}_thumb.jpg'
-
-                        cluster_proc = ClusterProcessor(
-                                [hdf5_path],
-                                model_name='gigapath',
-                                cluster_name='')
                         with st.spinner(f'クラスタリング中...', show_time=True):
-                            cluster_proc.anlyze_clusters(resolution=1.0)
+                            cluster_proc = ClusterProcessor(
+                                    [hdf5_path],
+                                    model_name='gigapath',
+                                    cluster_name='')
+                            cluster_proc.anlyze_clusters(resolution=1.0, progress='streamlit')
                         st.write(f'クラスタリング結果を{os.path.basename(umap_path)}に出力しました。')
                         cluster_proc.save_umap(umap_path)
 
                         with st.spinner('オーバービュー生成中', show_time=True):
                             thumb_proc = ThumbProcessor(hdf5_path, cluster_name='', size=64)
                             thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
-                        st.write(f'オーバービューを{os.path.basename(umap_path)}に出力しました。')
-                st.write('すべての処理が完了しました。')
-            set_locked_state(False)
-            # st.rerun()
+                        st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
+                    if i < len(selected_files)-1:
+                        st.divider()
+
+            st.write('すべての処理が完了しました。')
+            if st.button('リセットする', on_click=unlock):
+                st.rerun()
 
     elif mode == 'HDF5':
         st.subheader('HDF5ファイル解析オプション', divider=True)
@@ -412,7 +409,7 @@ def main():
             #                        min_value=0.0, max_value=3.0,
             #                        value=1.0, step=0.1)
             overwrite = st.checkbox('計算済みクラスタ結果を再計算する', value=False)
-            use_umap_embs = st.checkbox('ノード間距離計算にUMAPの埋め込みを使用する', value=False)
+            use_umap_embs = st.checkbox('エッジの重み算出にUMAPの埋め込みを使用する', value=False)
 
             if st.button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
                 set_locked_state(True)
@@ -457,7 +454,9 @@ def main():
                             thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
                             st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
                             st.image(Image.open(thumb_path))
-                set_locked_state(False)
+
+                if st.button('リセットする', on_click=unlock):
+                    st.rerun()
 
     else:
         st.warning(f'Invalid mode: {mode}')
