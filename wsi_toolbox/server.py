@@ -32,10 +32,37 @@ st.set_page_config(
     layout='wide'
 )
 
+if 'locked' not in st.session_state:
+    st.session_state.locked = False
+
+def add_beforeunload_js():
+    js = """
+    <script>
+        window.onbeforeunload = function(e) {
+            if (window.localStorage.getItem('streamlit_locked') === 'true') {
+                e.preventDefault();
+                e.returnValue = "処理中にページを離れると処理がリセットされます。ページを離れますか？";
+                return e.returnValue;
+            }
+        };
+    </script>
+    """
+    st.components.v1.html(js, height=0)
+
+
+def set_locked_state(is_locked):
+    st.session_state.locked = is_locked
+    js = f"""
+    <script>
+        window.localStorage.setItem('streamlit_locked', '{str(is_locked).lower()}');
+    </script>
+    """
+    st.components.v1.html(js, height=0)
+
+
 STATUS_READY = 0
 STATUS_BLOCKED = 1
 STATUS_UNSUPPORTED = 2
-
 
 def is_wsi_file(file_path):
     extensions = ['.ndpi', '.svs']
@@ -149,7 +176,6 @@ def list_files(directory):
     return all_items
 
 
-
 def get_mode_and_multi(selected_files):
     if len(selected_files) == 0:
         return 'Empty', False
@@ -179,6 +205,8 @@ def format_size(size_bytes):
 BASE_DIR = os.getenv('BASE_DIR', 'data')
 
 def main():
+    add_beforeunload_js()
+    set_locked_state(False)
     st.title('ロビえもんNEXT - WSI AI解析システム')
 
     if 'current_dir' not in st.session_state:
@@ -202,7 +230,6 @@ def main():
         if st.button('フォルダ更新'):
             st.rerun()
 
-
     files = list_files(st.session_state.current_dir)
     files_df = pd.DataFrame(files)
 
@@ -225,8 +252,8 @@ def main():
                 'Birthday',
                 format='YYYY/MM/DD hh:mm:ss',
             ),
-            'path': None,  # Hide path column
-            'detail': None,  # Hide path column
+            'path': None,
+            'detail': None,
         },
         hide_index=True,
         use_container_width=True,
@@ -237,8 +264,19 @@ def main():
     selected_files = [files[i] for i in selected_indices]
 
     mode, multi = get_mode_and_multi(selected_files)
+
     if mode == 'Empty':
         st.write('ファイル一覧の左の列のチェックボックスからファイルを選択してください。')
+        set_locked_state(False)
+        # #* Lock
+        # if st.button('lock', key='btn'):
+        #     set_locked_state(True)
+        #     for i in tqdm_or_st(range(10), backend='streamlit'):
+        #         time.sleep(1)
+        #     set_locked_state(False)
+
+        # #* Progress
+        # set_locked_state(False)
         # st.subheader('タイトル', divider=True)
         # with st.container(border=True):
         #     st.write('タイトル')
@@ -276,6 +314,7 @@ def main():
         do_clustering = st.checkbox('クラスタリングも実行する', value=True)
 
         if st.button('処理を実行', key='process_wsi'):
+            set_locked_state(True)
             for i, f in enumerate(selected_files):
                 with st.container(border=True):
                     st.title(f'[{i}/{len(selected_files)}] 処理WSIファイル: {f["name"]}')
@@ -294,7 +333,7 @@ def main():
 
                     tp = TileProcessor(model_name='gigapath', device='cuda')
                     with st.spinner('GigaPath特徴量を抽出中...', show_time=True):
-                        tp.evaluate_hdf5_file(hdf5_path, batch_size=256, progress='streamlit', overwrite=True)
+                        tp.evaluate_hdf5_file(hdf5_path, batch_size=256, overwrite=True, progress='streamlit')
                     st.write('GigaPath特徴量の抽出完了。')
 
             st.write('クラスタリングを開始します。')
@@ -320,6 +359,7 @@ def main():
                             st.image(Image.open(thumb_path))
                         st.write(f'オーバービューを{os.path.basename(umap_path)}に出力しました。')
                 st.write('すべての処理が完了しました。')
+            set_locked_state(False)
 
     elif mode == 'HDF5':
         st.subheader('HDF5ファイル解析オプション', divider=True)
@@ -346,14 +386,9 @@ def main():
                 use_container_width=False,
             )
 
-            ok = True
             cluster_name = ''
             if multi:
-                cluster_name = st.text_input(
-                    '',
-                    value='',
-                    placeholder='半角英数字でクラスタ名を入力してください',
-                )
+                cluster_name = st.text_input('', value='', placeholder='半角英数字でクラスタ名を入力してください')
 
             resolution = 1.0
             # resolution = st.slider('クラスタリング解像度',
@@ -363,6 +398,7 @@ def main():
             use_umap_embs = st.checkbox('ノード間距離計算にUMAPの埋め込みを使用する', value=False)
 
             if st.button('クラスタリングを実行', key='process_wsi'):
+                set_locked_state(True)
                 if multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
                     st.error('複数同時処理の場合はクラスタ名を入力してください。')
                 else:
@@ -393,7 +429,7 @@ def main():
                     st.write(f'クラスタリング結果を{os.path.basename(umap_path)}に出力しました。')
                     st.image(Image.open(umap_path))
 
-                    with st.spinner('オーバービュー生成中', show_time=True):
+                    with st.spinner('オーバービュー生成中...', show_time=True):
                         for file in selected_files:
                             thumb_proc = ThumbProcessor(file['path'], cluster_name=cluster_name, size=64)
                             base, ext = os.path.splitext(file['path'])
@@ -404,6 +440,7 @@ def main():
                             thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
                             st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
                             st.image(Image.open(thumb_path))
+                set_locked_state(False)
 
     else:
         st.warning(f'Invalid mode: {mode}')

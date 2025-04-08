@@ -386,7 +386,7 @@ class ClusterProcessor:
             return
 
         n_samples = self.scaled_features.shape[0]
-        tq = tqdm_or_st(total=n_samples+3, backend=progress)
+        tq = tqdm_or_st(total=n_samples+4, backend=progress) # PCA, KNN, leiden, Finalize
 
         tq.set_description(f'Processing PCA...')
         n_components = find_optimal_components(self.scaled_features)
@@ -437,10 +437,9 @@ class ClusterProcessor:
             # resolution_parameter=0.5, # more coarse cluster
         )
         tq.update(1)
-        tq.close()
         print('leiden clustering done')
 
-        # Convert partition result to cluster assignments
+        tq.set_description(f'Finalize...')
         clusters = np.full(n_samples, -1)  # Initialize all as noise
         for i, community in enumerate(partition):
             for node in community:
@@ -459,6 +458,9 @@ class ClusterProcessor:
                 if self.clusters_path in f:
                     del f[self.clusters_path]
                 f.create_dataset(self.clusters_path, data=cc)
+
+        tq.update(1)
+        tq.close()
 
         self.clusters = clusters
 
