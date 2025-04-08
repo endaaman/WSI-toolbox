@@ -399,14 +399,14 @@ class ClusterProcessor:
         G.add_nodes_from(range(n_samples))
 
         h = self.get_umap_embeddings() if use_umap_embs else target_features
+        print('umap_embeddings', use_umap_embs)
         for i in tqdm_or_st(range(n_samples), backend=progress):
             for j in indices[i]:
                 if i == j: # skip self loop
                     continue
                 if use_umap_embs:
                     distance = np.linalg.norm(h[i] - h[j])
-                    # weight = np.exp(-distance)
-                    weight = np.exp(-distance / distance.mean())
+                    weight = np.exp(-distance)
                 else:
                     explained_variance_ratio = pca.explained_variance_ratio_
                     weighted_diff = (h[i] - h[j]) * np.sqrt(explained_variance_ratio[:len(h[i])])
