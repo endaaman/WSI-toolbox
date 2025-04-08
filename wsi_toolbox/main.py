@@ -147,6 +147,7 @@ class CLI(BaseMLCLI):
     class PreviewScoresArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
+        name: str
         size: int = 64
         model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
         open: bool = False
@@ -156,10 +157,10 @@ class CLI(BaseMLCLI):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_scores.jpg'
+            output_path = f'{base}_scores_{a.name}.jpg'
 
         cmap = plt.get_cmap('viridis')
-        font = ImageFont.truetype(font=get_platform_font(), size=16)
+        font = ImageFont.truetype(font=get_platform_font(), size=12)
 
         with h5py.File(a.input_path, 'r') as f:
             cols = f['metadata/cols'][()]
@@ -167,7 +168,7 @@ class CLI(BaseMLCLI):
             patch_count = f['metadata/patch_count'][()]
             patch_size = f['metadata/patch_size'][()]
             coordinates = f['coordinates'][()]
-            scores = f[f'{a.model}/scores'][()]
+            scores = f[f'{a.model}/scores_{a.name}'][()]
 
             print('Filtered scores:', scores[scores > 0].shape)
 
@@ -179,7 +180,7 @@ class CLI(BaseMLCLI):
                 patch = Image.fromarray(patch)
                 patch = patch.resize((S, S))
                 score = scores[i]
-                if score > 0:
+                if not np.isnan(score):
                     color = mcolors.rgb2hex(cmap(score)[:3])
                     frame = create_frame(S, color, f'{score:.3f}', font)
                     patch.paste(frame, (0, 0), frame)
@@ -478,6 +479,8 @@ class CLI(BaseMLCLI):
         target_clusters: list[int] = Field(..., s='-T')
         model: str = Field('gigapath', l='--cluster', s='-C', choice=['gigapath', 'uni', 'unified', 'none'])
         scaler: str = Field('minmax', choices=['std', 'minmax'])
+        noshow: bool = False
+        fig: str = ''
 
     def run_cluster_scores(self, a):
         with h5py.File(a.input_path, 'r') as f:
@@ -508,32 +511,35 @@ class CLI(BaseMLCLI):
             data.append(cluster_values)
             labels.append(f'Cluster {target}')
 
-        plt.figure(figsize=(12, 8))
-        sns.set_style('whitegrid')
-        ax = plt.subplot(111)
-        sns.violinplot(data=data, ax=ax, inner='box', cut=0, zorder=1, alpha=0.5)  # cut=0で分布全体を表示
+        with h5py.File(a.input_path, 'a') as f:
+            path = f'{a.model}/scores_{a.name}'
+            if path in f:
+                del f[path]
+                print(f'Deleted {path}')
+            vv = np.full(patch_count, np.nan, dtype=values.dtype)
+            vv[mask] = values[:, 0]
+            f[path] = vv
+            print(f'Wrote {path} in {a.input_path}')
 
-        for i, d in enumerate(data):
-            x = np.random.normal(i, 0.05, size=len(d))
-            ax.scatter(x, d, alpha=.8, s=5, color=f'C{i}', zorder=2)
+        if not a.noshow:
+            plt.figure(figsize=(12, 8))
+            sns.set_style('whitegrid')
+            ax = plt.subplot(111)
+            sns.violinplot(data=data, ax=ax, inner='box', cut=0, zorder=1, alpha=0.5)  # cut=0で分布全体を表示
 
-        ax.set_xticks(np.arange(0, len(labels)))
-        ax.set_xticklabels(labels)
-        ax.set_ylabel('PCA Values')
-        ax.set_title('Distribution of PCA Values by Cluster')
-        ax.grid(axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        plt.show()
+            for i, d in enumerate(data):
+                x = np.random.normal(i, 0.05, size=len(d))
+                ax.scatter(x, d, alpha=.8, s=5, color=f'C{i}', zorder=2)
 
-        # with h5py.File(a.input_path, 'a') as f:
-        #     path = f'{a.model}/scores'
-        #     if path in f:
-        #         del f[path]
-        #         print(f'Deleted {path}')
-        #     vv = np.full(patch_count, -1, dtype=values.dtype)
-        #     vv[mask] = values[:, 0]
-        #     f[path] = vv
-        #     print(f'Wrote {path} in {a.input_path}')
+            ax.set_xticks(np.arange(0, len(labels)))
+            ax.set_xticklabels(labels)
+            ax.set_ylabel('PCA Values')
+            ax.set_title('Distribution of PCA Values by Cluster')
+            ax.grid(axis='y', linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            if a.fig:
+                plt.savefig(a.fig)
+            plt.show()
 
 
     class AlignKeysArgs(CommonArgs):
