@@ -386,7 +386,11 @@ class ClusterProcessor:
             return
 
         n_samples = self.scaled_features.shape[0]
-        tq = tqdm_or_st(total=n_samples+4, backend=progress) # PCA, KNN, leiden, Finalize
+        tq = tqdm_or_st(total=n_samples+5, backend=progress) # UMAP, PCA, KNN, leiden, Finalize
+
+        tq.set_description(f'UMAP projection...')
+        umap_embeddings = self.get_umap_embeddings()
+        tq.update(1)
 
         tq.set_description(f'Processing PCA...')
         n_components = find_optimal_components(self.scaled_features)
@@ -404,7 +408,7 @@ class ClusterProcessor:
         G = nx.Graph()
         G.add_nodes_from(range(n_samples))
 
-        h = self.get_umap_embeddings() if use_umap_embs else target_features
+        h = umap_embeddings if use_umap_embs else target_features
         print('umap_embeddings', use_umap_embs)
         tq.set_description(f'Processing edges...')
         for i in range(n_samples):

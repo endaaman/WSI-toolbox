@@ -400,18 +400,20 @@ def main():
                 use_container_width=False,
             )
 
+            form = st.form(key='form_hdf5')
+
             cluster_name = ''
             if multi:
-                cluster_name = st.text_input('', value='', placeholder='半角英数字でクラスタ名を入力してください')
+                cluster_name = form.text_input('クラスタ名', value='', placeholder='半角英数字でクラスタ名を入力してください')
 
-            resolution = 1.0
-            # resolution = st.slider('クラスタリング解像度',
-            #                        min_value=0.0, max_value=3.0,
-            #                        value=1.0, step=0.1)
-            overwrite = st.checkbox('計算済みクラスタ結果を再計算する', value=False)
-            use_umap_embs = st.checkbox('エッジの重み算出にUMAPの埋め込みを使用する', value=False)
+            # resolution = 1.0
+            resolution = form.slider('クラスタリング解像度',
+                                     min_value=0.0, max_value=3.0,
+                                     value=1.0, step=0.1)
+            overwrite = form.checkbox('計算済みクラスタ結果を再利用しない（再計算を行う）', value=False, disabled=st.session_state.locked)
+            use_umap_embs = form.checkbox('エッジの重み算出にUMAPの埋め込みを使用する', value=False, disabled=st.session_state.locked)
 
-            if st.button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
+            if form.form_submit_button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
                 set_locked_state(True)
                 if multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
                     st.error('複数同時処理の場合はクラスタ名を入力してください。')
@@ -440,8 +442,12 @@ def main():
                                                      use_umap_embs=use_umap_embs, progress='streamlit')
                         cluster_proc.save_umap(umap_path)
 
-                    st.write(f'クラスタリング結果を{os.path.basename(umap_path)}に出力しました。')
-                    st.image(Image.open(umap_path))
+                    st.subheader('UMAP投射 + クラスタリング')
+                    umap_filebname = os.path.basename(umap_path)
+                    st.image(Image.open(umap_path), caption=umap_filebname)
+                    st.write(f'{umap_filebname}に出力しました。')
+
+                    st.divider()
 
                     with st.spinner('オーバービュー生成中...', show_time=True):
                         for file in selected_files:
@@ -452,8 +458,11 @@ def main():
                             else:
                                 thumb_path = f'{base}_thumb.jpg'
                             thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
-                            st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
-                            st.image(Image.open(thumb_path))
+
+                            st.subheader('オーバービュー')
+                            thumb_filename= os.path.basename(thumb_path)
+                            st.image(Image.open(thumb_path), caption=thumb_filename)
+                            st.write(f'{thumb_filename}に出力しました。')
 
                 if st.button('リセットする', on_click=unlock):
                     st.rerun()
