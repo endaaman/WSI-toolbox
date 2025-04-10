@@ -407,9 +407,9 @@ def main():
                 cluster_name = form.text_input('クラスタ名', value='', placeholder='半角英数字でクラスタ名を入力してください')
 
             # resolution = 1.0
-            resolution = form.slider('クラスタリング解像度',
+            resolution = form.slider('クラスタリング解像度(Leiden resolution)',
                                      min_value=0.0, max_value=3.0,
-                                     value=1.0, step=0.1)
+                                     value=1.0, step=0.1, disabled=st.session_state.locked)
             overwrite = form.checkbox('計算済みクラスタ結果を再利用しない（再計算を行う）', value=False, disabled=st.session_state.locked)
             use_umap_embs = form.checkbox('エッジの重み算出にUMAPの埋め込みを使用する', value=False, disabled=st.session_state.locked)
 
