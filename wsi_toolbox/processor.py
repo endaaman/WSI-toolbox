@@ -399,7 +399,7 @@ class ClusterProcessor:
         target_features = pca.fit_transform(self.scaled_features)
         tq.update(1)
 
-        tq.set_description(f'Processing KNN')
+        tq.set_description(f'Processing KNN...')
         k = int(np.sqrt(len(target_features)))
         nn = NearestNeighbors(n_neighbors=k).fit(target_features)
         distances, indices = nn.kneighbors(target_features)
