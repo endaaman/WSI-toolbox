@@ -19,7 +19,7 @@ __package__ = 'wsi_toolbox'
 
 from .utils.progress import tqdm_or_st
 from .utils.st import st_horizontal
-from .processor import WSIProcessor, TileProcessor, ClusterProcessor, ThumbProcessor
+from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
 
 
 Image.MAX_IMAGE_PIXELS = 3_500_000_000
@@ -361,12 +361,13 @@ def main():
                                     model_name='gigapath',
                                     cluster_name='')
                             cluster_proc.anlyze_clusters(resolution=1.0, progress='streamlit')
+                            cluster_proc.plot_umap(fig_path=umap_path)
                         st.write(f'クラスタリング結果を{os.path.basename(umap_path)}に出力しました。')
-                        cluster_proc.save_umap(umap_path)
 
                         with st.spinner('オーバービュー生成中', show_time=True):
-                            thumb_proc = ThumbProcessor(hdf5_path, cluster_name='', size=64)
-                            thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
+                            thumb_proc = PreviewClustersProcessor(hdf5_path, cluster_name='', size=64)
+                            img = thumb_proc.create_thumbnail(progress='streamlit')
+                            img.save(thumb_path)
                         st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
                     if i < len(selected_files)-1:
                         st.divider()
@@ -404,10 +405,13 @@ def main():
 
             cluster_name = ''
             if multi:
-                cluster_name = form.text_input('クラスタ名', value='', placeholder='半角英数字でクラスタ名を入力してください')
+                cluster_name = form.text_input(
+                        'クラスタ名（複数スライドで同時クラスタリングを行う場合は、単一条件と区別するための名称が必要になります）',
+                        value='', placeholder='半角英数字でクラスタ名を入力してください')
+                cluster_name = cluster_name.lower()
 
             # resolution = 1.0
-            resolution = form.slider('クラスタリング解像度(Leiden resolution)',
+            resolution = form.slider('クラスタリング解像度（Leiden resolution）',
                                      min_value=0.0, max_value=3.0,
                                      value=1.0, step=0.1, disabled=st.session_state.locked)
             overwrite = form.checkbox('計算済みクラスタ結果を再利用しない（再計算を行う）', value=False, disabled=st.session_state.locked)
@@ -416,7 +420,7 @@ def main():
             if form.form_submit_button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
                 set_locked_state(True)
                 if multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
-                    st.error('複数同時処理の場合はクラスタ名を入力してください。')
+                    st.error('クラスタ名は小文字半角英数記号のみ入力してください')
                 else:
                     for f in selected_files:
                         if not f['detail']['has_features']:
@@ -440,7 +444,7 @@ def main():
                             umap_path = f'{base}_umap.png'
                         cluster_proc.anlyze_clusters(resolution=resolution, overwrite=overwrite,
                                                      use_umap_embs=use_umap_embs, progress='streamlit')
-                        cluster_proc.save_umap(umap_path)
+                        cluster_proc.plot_umap(fig_path=umap_path)
 
                     st.subheader('UMAP投射 + クラスタリング')
                     umap_filebname = os.path.basename(umap_path)
@@ -451,17 +455,17 @@ def main():
 
                     with st.spinner('オーバービュー生成中...', show_time=True):
                         for file in selected_files:
-                            thumb_proc = ThumbProcessor(file['path'], cluster_name=cluster_name, size=64)
+                            thumb_proc = PreviewClustersProcessor(file['path'], cluster_name=cluster_name, size=64)
                             base, ext = os.path.splitext(file['path'])
                             if multi:
                                 thumb_path = f'{base}_thumb_{cluster_name}.jpg'
                             else:
                                 thumb_path = f'{base}_thumb.jpg'
-                            thumb_proc.create_thumbnail(thumb_path, progress='streamlit')
-
+                            thumb = thumb_proc.create_thumbnail(progress='streamlit')
+                            thumb.save(thumb_path)
                             st.subheader('オーバービュー')
                             thumb_filename= os.path.basename(thumb_path)
-                            st.image(Image.open(thumb_path), caption=thumb_filename)
+                            st.image(thumb, caption=thumb_filename)
                             st.write(f'{thumb_filename}に出力しました。')
 
                 if st.button('リセットする', on_click=unlock):

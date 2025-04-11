@@ -27,7 +27,7 @@ from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
-from .processor import WSIProcessor, TileProcessor
+from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
 from .utils import hover_images_on_scatters, find_optimal_components, create_frame, get_platform_font
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.progress import tqdm_or_st
@@ -53,8 +53,9 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         patch_size: int = 256
-        overwrite: bool = False
+        overwrite: bool = Field(False, s='-O')
         engine: str = Field('auto', choices=['auto', 'openslide', 'tifffile'])
+        mpp: float = 0
 
     def run_wsi2h5(self, a):
         output_path = a.output_path
@@ -72,10 +73,11 @@ class CLI(BaseMLCLI):
         if d:
             os.makedirs(d, exist_ok=True)
 
-        p = WSIProcessor(a.input_path, engine=a.engine)
+        p = WSIProcessor(a.input_path, engine=a.engine, mpp=a.mpp)
         p.convert_to_hdf5(output_path, patch_size=a.patch_size, progress='tqdm')
 
         print('done')
+
 
     class PreviewArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
@@ -86,7 +88,6 @@ class CLI(BaseMLCLI):
         open: bool = False
 
     def run_preview(self, a):
-        S = a.size
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
@@ -95,50 +96,12 @@ class CLI(BaseMLCLI):
             else:
                 output_path = f'{base}_thumb.jpg'
 
-        cmap = plt.get_cmap('tab20')
-        with h5py.File(a.input_path, 'r') as f:
-            cols = f['metadata/cols'][()]
-            rows = f['metadata/rows'][()]
-            patch_count = f['metadata/patch_count'][()]
-            patch_size = f['metadata/patch_size'][()]
-
-            show_clusters = False
-            clusters = []
-            cluster_path = f'{a.model}/clusters'
-            if a.cluster_name:
-                cluster_path += f'_{a.cluster_name}'
-            if a.model != 'none':
-                if cluster_path in f:
-                    show_clusters = True
-                    clusters = f[cluster_path][:]
-                    print('loaded cluster data', clusters.shape)
-                else:
-                    print(f'"{a.model}/clusters" was not found in h5 data.')
-
-            frames = {}
-            if show_clusters:
-                font = ImageFont.truetype(font=get_platform_font(), size=16)
-                for cluster in np.unique(clusters).tolist() + [-1]:
-                    if cluster < 0:
-                        color = '#111'
-                    else:
-                        color = mcolors.rgb2hex(cmap(cluster)[:3])
-                    frames[cluster] = create_frame(S, color, f'{cluster}', font)
-
-            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
-            for i in tqdm(range(patch_count)):
-                coord = f['coordinates'][i]
-                x, y = coord//patch_size*S
-                patch = f['patches'][i]
-                patch = Image.fromarray(patch)
-                patch = patch.resize((S, S))
-                if show_clusters:
-                    frame = frames[clusters[i]]
-                    patch.paste(frame, (0, 0), frame)
-                canvas.paste(patch, (x, y, x+S, y+S))
-
-            canvas.save(output_path)
-            print(f'wrote {output_path}')
+        thumb_proc = PreviewClustersProcessor(
+                a.input_path,
+                cluster_name=a.cluster_name,
+                size=a.size)
+        img = thumb_proc.create_thumbnail(progress='tqdm')
+        img.save(output_path)
 
         if a.open:
             os.system(f'xdg-open {output_path}')
@@ -196,8 +159,9 @@ class CLI(BaseMLCLI):
     class ProcessPatchesArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         batch_size: int = Field(512, s='-B')
-        overwrite: bool = False
+        overwrite: bool = Field(False, s='-O')
         model_name: str = Field('gigapath', choice=['gigapath', 'uni'], l='--model', s='-M')
+        target: str = Field('cls_token', choices=['cls_token', 'patch_embs'])
 
     def run_process_patches(self, a):
         target_name = f'{a.model_name}/features'
@@ -255,7 +219,7 @@ class CLI(BaseMLCLI):
 
     class ProcessSlideArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
-        overwrite: bool = False
+        overwrite: bool = Field(False, s='-O')
 
     def run_process_slide(self, a):
         with h5py.File(a.input_path, 'r') as f:
@@ -296,178 +260,36 @@ class CLI(BaseMLCLI):
     class ClusterArgs(CommonArgs):
         input_paths: list[str] = Field(..., l='--in', s='-i')
         name: str = ''
-        models: list[str] = Field(['gigapath'], choices=['uni', 'gigapath'])
-        method: str = Field('leiden', s='-M')
+        model: str = Field('gigapath', choices=['gigapath', 'uni'])
+        resolution: float = 1
+        use_umap_embs: float = False
         nosave: bool = False
         noshow: bool = False
+        overwrite: bool = Field(False, s='-O')
 
     def run_cluster(self, a):
-        assert len(a.models) > 0
-        model_name = {
-            frozenset(['uni']): 'uni',
-            frozenset(['gigapath']): 'gigapath',
-            frozenset(['uni', 'gigapath']): 'unified'
-        }.get(frozenset(a.models))
-        if not model_name:
-            raise ValueError('Invalid models', a.models)
+        cluster_proc = ClusterProcessor(
+                a.input_paths,
+                model_name=a.model,
+                cluster_name=a.name)
+        cluster_proc.anlyze_clusters(
+                resolution=a.resolution,
+                use_umap_embs=a.use_umap_embs,
+                overwrite=a.overwrite,
+                progress='tqdm')
 
-        multi = len(a.input_paths) > 1
-
-        if multi:
-            if not a.name:
-                raise RuntimeError('Multiple files provided but name was not specified.')
-
-        features = []
-        lengths = []
-        for input_path in a.input_paths:
-            with h5py.File(input_path, 'r') as f:
-                patch_count = f['metadata/patch_count'][()]
-                feature_arrays = []
-                for model in a.models:
-                    path = f'{model}/features'
-                    if path in f:
-                        feature_arrays.append(f[path][:])
-                    else:
-                        raise RuntimeError(f'"{path}" does not exist. Do `process-patches` first')
-                features.append(np.concatenate(feature_arrays, axis=1))
-                lengths.append(patch_count)
-
-        features = np.concatenate(features)
-        print('Loaded features', features.shape)
-        scaler = StandardScaler()
-        scaled_features = scaler.fit_transform(features)
-
-        print('UMAP fitting...')
-        reducer = umap.UMAP(
-                # n_neighbors=30,
-                # min_dist=0.05,
-                n_components=2,
-                # random_state=a.seed
-            )
-        embedding = reducer.fit_transform(scaled_features)
-        print('UMAP done')
-
-        eps = 0.2
-        if a.method.lower() == 'leiden':
-            # 13954, 18839
-            n_components = find_optimal_components(scaled_features)
-            print('Optimal n_components:', n_components)
-            pca = PCA(n_components)
-            target_features = pca.fit_transform(scaled_features)
-
-            k = int(np.sqrt(len(target_features)))
-            nn = NearestNeighbors(n_neighbors=k).fit(target_features)
-            distances, indices = nn.kneighbors(target_features)
-
-            G = nx.Graph()
-            n_samples = embedding.shape[0]
-            G.add_nodes_from(range(n_samples))
-
-            # Add edges based on k-nearest neighbors
-            for i in range(n_samples):
-                for j in indices[i]:
-                    if i != j:  # Avoid self-loops
-                        # Add edge weight based on distance (closer points have higher weights)
-                        # distance = np.linalg.norm(embedding[i] - embedding[j])
-                        distance = np.linalg.norm(target_features[i] - target_features[j])
-                        weight = np.exp(-distance)  # Convert distance to similarity
-                        G.add_edge(i, j, weight=weight)
-
-            # Convert NetworkX graph to igraph for Leiden algorithm
-            edges = list(G.edges())
-            weights = [G[u][v]['weight'] for u, v in edges]
-            ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
-
-            partition = la.find_partition(
-                ig_graph,
-                la.RBConfigurationVertexPartition,
-                weights='weight',
-                resolution_parameter=1.0, # maybe most adaptive
-                # resolution_parameter=0.5, # more coarse cluster
-            )
-
-            # Convert partition result to cluster assignments
-            clusters = np.full(n_samples, -1)  # Initialize all as noise
-            for i, community in enumerate(partition):
-                for node in community:
-                    clusters[node] = i
-
-        elif a.method.lower() == 'hdbscan':
-            target_features = embedding
-            m = hdbscan.HDBSCAN(
-                min_cluster_size=5,
-                min_samples=5,
-                cluster_selection_epsilon=eps,
-                metric='euclidean'
-            )
-            clusters = m.fit_predict(target_features)
-        else:
-            raise RuntimeError('Invalid medthod:', a.method)
-
-        n_clusters = len(set(clusters)) - (1 if -1 in clusters else 0)
-        n_noise = list(clusters).count(-1)
-        print('n_clusters', n_clusters)
-        print('n_noise', n_noise)
-
-        fig, ax = plt.subplots(figsize=(10, 8))
-        cmap = plt.get_cmap('tab20')
-        # colors = plt.cm.rainbow(np.linspace(0, 1, len(set(clusters))))
-        cluster_ids = sorted(list(set(clusters)))
-        for i, cluster_id in enumerate(cluster_ids):
-            coords = embedding[clusters == cluster_id]
-            if cluster_id == -1:
-                color = 'black'
-                label = 'Noise'
-                size = 12
-            else:
-                color = [cmap(cluster_id % 20)]
-                label = f'Cluster {cluster_id}'
-                size = 7
-            plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
-
-        for cluster_id in cluster_ids:
-            if cluster_id < 0:
-                continue
-            cluster_points = embedding[clusters == cluster_id]
-            if len(cluster_points) < 1:
-                continue
-            centroid_x = np.mean(cluster_points[:, 0])
-            centroid_y = np.mean(cluster_points[:, 1])
-            ax.text(centroid_x, centroid_y, str(cluster_id),
-                   fontsize=12, fontweight='bold',
-                   ha='center', va='center',
-                   bbox=dict(facecolor='white', alpha=0.1, edgecolor='none'))
-
-        plt.title(f'UMAP + {a.method} Clustering')
-        plt.xlabel('UMAP Dimension 1')
-        plt.ylabel('UMAP Dimension 2')
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-
-        if multi:
+        if len(a.input_paths) > 1:
             # multiple
             dir = os.path.dirname(a.input_paths[0])
             fig_path = f'{dir}/{a.name}.png'
         else:
             base, ext = os.path.splitext(a.input_paths[0])
             fig_path = f'{base}_umap.png'
-        plt.savefig(fig_path)
-        print(f'wrote {fig_path}')
 
+        fig = cluster_proc.plot_umap()
         if not a.nosave:
-            cursor = 0
-            for input_path, length in zip(a.input_paths, lengths):
-                cc = clusters[cursor:cursor+length]
-                cursor += length
-                with h5py.File(input_path, 'a') as f:
-                    if multi:
-                        path = f'{model_name}/clusters_{a.name}'
-                    else:
-                        path = f'{model_name}/clusters'
-                    if path in f:
-                        del f[path]
-                    f.create_dataset(path, data=cc)
-                print(f'Save clusters to {input_path}')
+            fig.savefig(fig_path)
+            print(f'wrote {fig_path}')
 
         if not a.noshow:
             plt.show()

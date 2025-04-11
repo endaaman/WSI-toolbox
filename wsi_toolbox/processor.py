@@ -54,7 +54,7 @@ class WSIFile:
         pass
 
 
-class WSITiffFile(WSIFile):
+class TiffFile(WSIFile):
     def __init__(self, path):
         self.tif = tifffile.TiffFile(path)
 
@@ -123,7 +123,7 @@ class WSITiffFile(WSIFile):
         return region
 
 
-class WSIOpenSlideFile(WSIFile):
+class OpenSlideFile(WSIFile):
     def __init__(self, path):
         self.wsi = OpenSlide(path)
         self.prop = dict(self.wsi.properties)
@@ -143,22 +143,44 @@ class WSIOpenSlideFile(WSIFile):
         return img
 
 
+class StandardImage(WSIFile):
+    def __init__(self, path, **extra):
+        self.image = cv2.imread(path)
+        self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)  # OpenCVはBGR形式で読み込むのでRGBに変換
+        self.mpp = extra.pop('mpp', None)
+        assert self.mpp is not None, 'Specify mpp when using StandardImage'
+
+    def get_mpp(self):
+        return self.mpp
+
+    def get_original_size(self):
+        return self.image.shape[1], self.image.shape[0]  # width, height
+
+    def read_region(self, xywh):
+        x, y, w, h = xywh
+        return self.image[y:y+h, x:x+w]
+
 class WSIProcessor:
     wsi: WSIFile
-    def __init__(self, wsi_path, engine='auto'):
+    def __init__(self, image_path, engine='auto', **extra):
         if engine == 'auto':
-            ext = os.path.splitext(wsi_path)[1]
+            ext = os.path.splitext(image_path)[1].lower()
             if ext == '.ndpi':
                 engine = 'tifffile'
+            if ext in ['.jpg', '.jpeg', '.png', '.tif', 'tiff']:
+                engine = 'standard'
             else:
                 engine = 'openslide'
-        self.engine = engine
+
+        self.engine = engine.lower()
         if engine == 'openslide':
-            self.wsi = WSIOpenSlideFile(wsi_path)
+            self.wsi = OpenSlideFile(image_path, **extra)
         elif engine == 'tifffile':
-            self.wsi = WSITiffFile(wsi_path)
+            self.wsi = TiffFile(image_path, **extra)
+        elif engine == 'standard':
+            self.wsi = StandardImage(image_path, **extra)
         else:
-            raise ValueError('Invalid engine', a.engine)
+            raise ValueError('Invalid engine', engine)
         self.target_level = 0
         self.original_mpp = self.wsi.get_mpp()
 
@@ -324,8 +346,6 @@ class TileProcessor:
                 gc.collect()
 
 
-
-
 class ClusterProcessor:
     def __init__(self, hdf5_paths, model_name='gigapath', cluster_name=''):
         assert model_name in ['uni', 'gigapath']
@@ -367,7 +387,6 @@ class ClusterProcessor:
         if np.any(self._umap_embeddings):
             return self._umap_embeddings
 
-        print('UMAP fitting...')
         reducer = umap.UMAP(
                 # n_neighbors=30,
                 # min_dist=0.05,
@@ -375,7 +394,6 @@ class ClusterProcessor:
                 # random_state=a.seed
             )
         embs = reducer.fit_transform(self.scaled_features)
-        print('UMAP done')
         self._umap_embeddings = embs
         return embs
 
@@ -394,7 +412,6 @@ class ClusterProcessor:
 
         tq.set_description(f'Processing PCA...')
         n_components = find_optimal_components(self.scaled_features)
-        print('Optimal n_components:', n_components)
         pca = PCA(n_components)
         target_features = pca.fit_transform(self.scaled_features)
         tq.update(1)
@@ -409,7 +426,6 @@ class ClusterProcessor:
         G.add_nodes_from(range(n_samples))
 
         h = umap_embeddings if use_umap_embs else target_features
-        print('umap_embeddings', use_umap_embs)
         tq.set_description(f'Processing edges...')
         for i in range(n_samples):
             for j in indices[i]:
@@ -431,7 +447,6 @@ class ClusterProcessor:
         weights = [G[u][v]['weight'] for u, v in edges]
         ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
 
-        print('Starting leiden clustering...')
         partition = la.find_partition(
             ig_graph,
             la.RBConfigurationVertexPartition,
@@ -441,7 +456,6 @@ class ClusterProcessor:
             # resolution_parameter=0.5, # more coarse cluster
         )
         tq.update(1)
-        print('leiden clustering done')
 
         tq.set_description(f'Finalize...')
         clusters = np.full(n_samples, -1)  # Initialize all as noise
@@ -469,7 +483,7 @@ class ClusterProcessor:
         self.clusters = clusters
 
 
-    def save_umap(self, fig_path):
+    def plot_umap(self, fig_path=None):
         if not np.any(self.clusters):
             raise RuntimeError('Compute clusters before umap projection.')
         clusters = self.clusters
@@ -509,22 +523,23 @@ class ClusterProcessor:
         plt.ylabel('UMAP Dimension 2')
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-        # plt.savefig(fig_path)
-        plt.savefig(fig_path, bbox_inches='tight', pad_inches=0.5)
-        print(f'wrote {fig_path}')
-        return fig_path
+        if fig_path is not None:
+            plt.savefig(fig_path, bbox_inches='tight', pad_inches=0.5)
+            print(f'wrote {fig_path}')
+        return fig
 
 
-class ThumbProcessor:
-    def __init__(self, hdf5_path, cluster_name='', size=64):
+
+class PreviewClustersProcessor:
+    def __init__(self, hdf5_path, model_name='gigapath', cluster_name='', size=64):
         self.hdf5_path = hdf5_path
+        self.model_name = model_name
         self.cluster_name = cluster_name
+        self.draw_clusters = cluster_name is not None
         self.size = size
 
-    def create_thumbnail(self, output_path, progress='tqdm'):
+    def create_thumbnail(self, font_size=16, progress='tqdm'):
         S = self.size
-
-        cmap = plt.get_cmap('tab20')
         with h5py.File(self.hdf5_path, 'r') as f:
             cols = f['metadata/cols'][()]
             rows = f['metadata/rows'][()]
@@ -532,19 +547,21 @@ class ThumbProcessor:
             patch_size = f['metadata/patch_size'][()]
 
             clusters = []
-            cluster_path = 'gigapath/clusters'
-            if self.cluster_name:
-                cluster_path += f'_{self.cluster_name}'
-            clusters = f[cluster_path][:]
+            if self.draw_clusters:
+                # if None, clusters would be empty
+                cluster_path = f'{self.model_name}/clusters'
+                if self.cluster_name:
+                    cluster_path += f'_{self.cluster_name}'
+                clusters = f[cluster_path][:]
 
+            font = ImageFont.truetype(font=get_platform_font(), size=font_size)
+
+            cmap = plt.get_cmap('tab20')
             frames = {}
-            font = ImageFont.truetype(font=get_platform_font(), size=16)
-            for cluster in np.unique(clusters).tolist() + [-1]:
-                if cluster < 0:
-                    color = '#111'
-                else:
-                    color = mcolors.rgb2hex(cmap(cluster)[:3])
-                frames[cluster] = create_frame(S, color, f'{cluster}', font)
+            if self.draw_clusters:
+                for cluster in np.unique(clusters).tolist() + [-1]:
+                    color = mcolors.rgb2hex(cmap(cluster)[:3]) if cluster >= 0 else '#111'
+                    frames[cluster] = create_frame(S, color, f'{cluster}', font)
 
             canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
             tq = tqdm_or_st(range(patch_count), backend=progress)
@@ -552,10 +569,45 @@ class ThumbProcessor:
                 coord = f['coordinates'][i]
                 x, y = coord//patch_size*S
                 patch = f['patches'][i]
-                patch = Image.fromarray(patch)
-                patch = patch.resize((S, S))
-                frame = frames[clusters[i]]
-                patch.paste(frame, (0, 0), frame)
+                patch = Image.fromarray(patch).resize((S, S))
+                if self.draw_clusters:
+                    frame = frames[clusters[i]]
+                    patch.paste(frame, (0, 0), frame)
+                canvas.paste(patch, (x, y, x+S, y+S))
+
+        return canvas
+
+
+class PreviewScoresProcessor:
+    def __init__(self, hdf5_path, model_name='gigapath', score_name='', size=64):
+        self.hdf5_path = hdf5_path
+        self.model_name = model_name
+        self.score_name = score_name
+        self.size = size
+
+    def create_thumbnail(self, progress='tqdm'):
+        S = self.size
+        with h5py.File(self.hdf5_path, 'r') as f:
+            cols = f['metadata/cols'][()]
+            rows = f['metadata/rows'][()]
+            patch_count = f['metadata/patch_count'][()]
+            patch_size = f['metadata/patch_size'][()]
+            coordinates = f['coordinates'][()]
+            scores = f[f'{a.model}/scores_{self.score_name}'][()]
+
+            print('Filtered scores:', scores[scores > 0].shape)
+
+            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
+            for i in tqdm(range(patch_count)):
+                coord = coordinates[i]
+                x, y = coord//patch_size*S
+                patch = f['patches'][i]
+                patch = Image.fromarray(patch).resize((S, S))
+                score = scores[i]
+                if not np.isnan(score):
+                    color = mcolors.rgb2hex(cmap(score)[:3])
+                    frame = create_frame(S, color, f'{score:.3f}', font)
+                    patch.paste(frame, (0, 0), frame)
                 canvas.paste(patch, (x, y, x+S, y+S))
 
             canvas.save(output_path)
