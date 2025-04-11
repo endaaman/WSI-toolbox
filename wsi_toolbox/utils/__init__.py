@@ -13,6 +13,7 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from .cli import BaseMLCLI, BaseMLArgs
 
 
+
 def yes_no_prompt(question):
     print(f"{question} [Y/n]: ", end="")
     response = input().lower()

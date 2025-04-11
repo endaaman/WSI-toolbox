@@ -28,6 +28,7 @@ import timm
 from gigapath import slide_encoder
 
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
+from .common import create_model
 from .utils import hover_images_on_scatters, find_optimal_components, create_frame, get_platform_font
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.progress import tqdm_or_st
@@ -60,7 +61,7 @@ class CLI(BaseMLCLI):
     def run_wsi2h5(self, a):
         output_path = a.output_path
         if not output_path:
-            base, ext = os.path.splitext(input_path)
+            base, ext = os.path.splitext(a.input_path)
             output_path = base + '.h5'
 
         if os.path.exists(output_path):
@@ -161,7 +162,7 @@ class CLI(BaseMLCLI):
         batch_size: int = Field(512, s='-B')
         overwrite: bool = Field(False, s='-O')
         model_name: str = Field('gigapath', choice=['gigapath', 'uni'], l='--model', s='-M')
-        target: str = Field('cls_token', choices=['cls_token', 'patch_embs'])
+        with_latent_features: bool = Field(False, s='-L')
 
     def run_process_patches(self, a):
         target_name = f'{a.model_name}/features'
@@ -171,18 +172,7 @@ class CLI(BaseMLCLI):
                     print('patch embeddings are already obtained.')
                     return
 
-        if a.model_name == 'uni':
-            model = timm.create_model('hf-hub:MahmoodLab/uni',
-                                      pretrained=True,
-                                      dynamic_img_size=True,
-                                      init_values=1e-5)
-        elif a.model_name == 'gigapath':
-            model = timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
-                                      pretrained=True,
-                                      dynamic_img_size=True)
-        else:
-            raise ValueError('Invalid model_name', a.model_name)
-
+        model = create_model(a.model_name)
         model = model.eval().to(a.device)
 
         mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(a.device)
@@ -202,8 +192,8 @@ class CLI(BaseMLCLI):
                 x = x.to(a.device)
                 x = (x-mean)/std
                 with torch.set_grad_enabled(False):
-                    h = model(x)
-                h = h.cpu().detach()
+                    h = model.forward_features(x)
+                h = h.cpu().detach().numpy()
                 hh.append(h)
             hh = torch.cat(hh).numpy()
 
@@ -215,6 +205,7 @@ class CLI(BaseMLCLI):
                 print('Overwriting features.')
                 del f[target_name]
             f.create_dataset(target_name, data=hh)
+
 
 
     class ProcessSlideArgs(CommonArgs):
@@ -400,6 +391,8 @@ class CLI(BaseMLCLI):
                 else:
                     print('Both "slide_feature" and "gigapath/slide_feature" do not exist')
 
+        # img  = (img*256).astype(np.uint8)
+        # Image.fromarray(img).resize((256, 256), Image.NEAREST).save('1.png')
 
 
 if __name__ == '__main__':

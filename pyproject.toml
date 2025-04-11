@@ -74,4 +74,5 @@ packages = ["wsi_toolbox"]
 [dependency-groups]
 dev = [
     "ipython>=9.1.0",
+    "jupyterlab>=4.1.6",
 ]

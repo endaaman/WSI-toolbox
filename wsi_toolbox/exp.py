@@ -397,6 +397,70 @@ class CLI(BaseMLCLI):
 
         print(elbow_idx, dim_90, dim_95)
 
+
+
+
+    def run_embs(self, a):
+        paths = [
+            './data/image_to_test/25-0856_tile1.png',
+            './data/image_to_test/25-0856_tile2.png',
+            './data/image_to_test/25-0856_tile3.png',
+        ]
+        images = [np.array(Image.open(f)) for f in paths]
+        # img = img.crop((0, 0, 256, 256))
+        # x = np.array(img)
+        x = np.stack(images)
+        print(x.shape)
+
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to('cuda')
+        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to('cuda')
+
+        x = (torch.from_numpy(x)/255).permute(0, 3, 1, 2)
+        x = x.to(a.device)
+        x = (x-mean)/std
+
+        print('x shape', x.shape)
+
+        model = create_model('uni').cuda()
+        t = model.forward_features(x)
+        print('done inference')
+        t = t.cpu().detach().numpy()
+
+        patch_embs, cls_token = t[:, :-1, ...], t[:, -1, ...]
+        print('patch_embs', patch_embs.shape, 'cls_token', cls_token.shape)
+
+        s = patch_embs.shape
+        patch_embs_to_pca = patch_embs.reshape(s[0]*s[1], s[-1])
+
+        print('PCA input', patch_embs_to_pca.shape)
+
+        pca = PCA(n_components=3)
+        values = pca.fit_transform(patch_embs_to_pca)
+
+        scaler = MinMaxScaler()
+        values = scaler.fit_transform(values)
+
+        imgs = values.reshape(3,16,16,3)
+
+        plt.figure(figsize=(8, 7))
+
+        plt.subplot(2, 3, 1)
+        plt.imshow(images[0])
+        plt.subplot(2, 3, 2)
+        plt.imshow(images[1])
+        plt.subplot(2, 3, 3)
+        plt.imshow(images[2])
+
+        plt.subplot(2, 3, 4)
+        plt.imshow(imgs[0])
+        plt.subplot(2, 3, 5)
+        plt.imshow(imgs[1])
+        plt.subplot(2, 3, 6)
+        plt.imshow(imgs[2])
+
+        plt.tight_layout()
+        plt.show()
+
 if __name__ == '__main__':
     cli = CLI()
     cli.run()

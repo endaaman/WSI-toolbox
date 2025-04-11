@@ -20,6 +20,7 @@ import networkx as nx
 import leidenalg as la
 import igraph as ig
 
+from .common import create_model
 from .utils import find_optimal_components, create_frame, get_platform_font
 from .utils.progress import tqdm_or_st
 
@@ -144,10 +145,10 @@ class OpenSlideFile(WSIFile):
 
 
 class StandardImage(WSIFile):
-    def __init__(self, path, **extra):
+    def __init__(self, path, mpp):
         self.image = cv2.imread(path)
         self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)  # OpenCVはBGR形式で読み込むのでRGBに変換
-        self.mpp = extra.pop('mpp', None)
+        self.mpp = mpp
         assert self.mpp is not None, 'Specify mpp when using StandardImage'
 
     def get_mpp(self):
@@ -174,13 +175,15 @@ class WSIProcessor:
 
         self.engine = engine.lower()
         if engine == 'openslide':
-            self.wsi = OpenSlideFile(image_path, **extra)
+            self.wsi = OpenSlideFile(image_path)
         elif engine == 'tifffile':
-            self.wsi = TiffFile(image_path, **extra)
+            self.wsi = TiffFile(image_path)
         elif engine == 'standard':
-            self.wsi = StandardImage(image_path, **extra)
+            mpp = extra.pop('mpp', None)
+            self.wsi = StandardImage(image_path, mpp=mpp)
         else:
             raise ValueError('Invalid engine', engine)
+
         self.target_level = 0
         self.original_mpp = self.wsi.get_mpp()
 
@@ -275,18 +278,7 @@ class TileProcessor:
         self.target_name = f'{model_name}/features'
 
     def evaluate_hdf5_file(self, hdf5_path, batch_size=256, overwrite=False, progress='tqdm'):
-        if self.model_name == 'uni':
-            model = timm.create_model('hf-hub:MahmoodLab/uni',
-                                      pretrained=True,
-                                      dynamic_img_size=True,
-                                      init_values=1e-5)
-        elif self.model_name == 'gigapath':
-            model = timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
-                                      pretrained=True,
-                                      dynamic_img_size=True)
-        else:
-            raise ValueError('Invalid model_name', self.model_name)  # model_nameをself.model_nameに修正
-
+        model = create_model(self.model_name)
         model = model.eval().to(self.device)
 
         mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(self.device)
