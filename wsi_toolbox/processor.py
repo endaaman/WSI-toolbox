@@ -41,6 +41,10 @@ def cosine_distance(x, y):
     weight = np.exp(-distance / distance.mean())
     return distance, weight
 
+def safe_del(hdf_file, key_path):
+    if key_path in hdf_file:
+        del hdf_file[key_path]
+
 class WSIFile:
     def __init__(self, path):
         pass
@@ -275,9 +279,12 @@ class TileProcessor:
         assert model_name in ['uni', 'gigapath']
         self.model_name = model_name
         self.device = device
-        self.target_name = f'{model_name}/features'
+        self.feature_name = f'{model_name}/features'
+        self.latent_feature_name = f'{model_name}/latent_features'
 
-    def evaluate_hdf5_file(self, hdf5_path, batch_size=256, overwrite=False, progress='tqdm'):
+    def evaluate_hdf5_file(self, hdf5_path, batch_size=256,
+                           with_latent_features=False,
+                           overwrite=False, progress='tqdm'):
         model = create_model(self.model_name)
         model = model.eval().to(self.device)
 
@@ -286,14 +293,24 @@ class TileProcessor:
 
         done = False
 
-        with h5py.File(hdf5_path, 'r+') as f:  # 'r+'に変更して読み書き両方可能に
+        with h5py.File(hdf5_path, 'r+') as f:
             try:
-                if self.target_name in f:
-                    if overwrite:
-                        print('Overwriting features.')
-                        del f[self.target_name]
+                if overwrite:
+                    safe_del(f, self.feature_name)
+                    safe_del(f, self.latent_feature_name)
+                else:
+                    if with_latent_features:
+                        if (self.feature_name in f) and (self.latent_feature_name in f):
+                            # Both exist
+                            print('Already extracted. Skipped.')
+                            return
+                        if (self.feature_name in f) or (self.latent_feature_name in f):
+                            # Either exists
+                            raise RuntimeError(f'Either {self.feature_name} or {self.latent_feature_name} exists.')
                     else:
-                        return
+                        if self.feature_name in f:
+                            print('Already extracted. Skipped.')
+                            return
 
                 patch_count = f['metadata/patch_count'][()]
                 batch_idx = [
@@ -301,9 +318,9 @@ class TileProcessor:
                     for i in range(0, patch_count, batch_size)
                 ]
 
-                # バッファに全部メモリを確保せず、直接書き込む
-                # データセットを前もって作成
-                f.create_dataset(self.target_name, shape=(patch_count, model.num_features), dtype=np.float32)
+                f.create_dataset(self.feature_name, shape=(patch_count, model.num_features), dtype=np.float32)
+                if with_latent_features:
+                    f.create_dataset(self.latent_feature_name, shape=(patch_count, 256, model.num_features), dtype=np.float32)
 
                 tq = tqdm_or_st(batch_idx, backend=progress)
                 for i0, i1 in tq:
@@ -314,25 +331,27 @@ class TileProcessor:
                     x = (x-mean)/std
 
                     with torch.no_grad():
-                        h = model(x)
+                        h_tensor = model.forward_features(x)
 
-                    h_np = h.cpu().detach().numpy()
+                    h = h_tensor.cpu().detach().numpy()
+                    latent_feature, cls_feature = h[:, :-1, ...], h[:, -1, ...]
 
-                    f[self.target_name][i0:i1] = h_np
+                    f[self.feature_name][i0:i1] = cls_feature
+                    if with_latent_features:
+                        f[self.latent_feature_name][i0:i1] = latent_feature
 
-                    # 明示的にGPUメモリを解放
-                    del x, h
+                    del x, h_tensor
                     torch.cuda.empty_cache()
                     tq.set_description(f'Processing {i0}-{i1}(total={patch_count})')
                     tq.refresh()
 
-                print('embeddings dimension', f[self.target_name].shape)
+                print('embeddings dimension', f[self.feature_name].shape)
                 done = True
 
             finally:
                 if not done:
-                    del f[self.target_name]
-                    print(f'ABORTED! deleted {self.target_name}')
+                    del f[self.feature_name]
+                    print(f'ABORTED! deleted {self.feature_name}')
                 del model, mean, std
                 torch.cuda.empty_cache()
                 gc.collect()

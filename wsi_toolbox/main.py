@@ -165,47 +165,12 @@ class CLI(BaseMLCLI):
         with_latent_features: bool = Field(False, s='-L')
 
     def run_process_patches(self, a):
-        target_name = f'{a.model_name}/features'
-        with h5py.File(a.input_path, 'r') as f:
-            if target_name in f:
-                if not a.overwrite:
-                    print('patch embeddings are already obtained.')
-                    return
-
-        model = create_model(a.model_name)
-        model = model.eval().to(a.device)
-
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(a.device)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(a.device)
-
-        with h5py.File(a.input_path, 'r') as f:
-            patch_count = f['metadata/patch_count'][()]
-            batch_idx = [
-                (i, min(i+a.batch_size, patch_count))
-                for i in range(0, patch_count, a.batch_size)
-            ]
-            hh = []
-            for i0, i1 in tqdm(batch_idx):
-                coords = f['coordinates'][i0:i1]
-                x = f['patches'][i0:i1]
-                x = (torch.from_numpy(x)/255).permute(0, 3, 1, 2) # BHWC->BCHW
-                x = x.to(a.device)
-                x = (x-mean)/std
-                with torch.set_grad_enabled(False):
-                    h = model.forward_features(x)
-                h = h.cpu().detach().numpy()
-                hh.append(h)
-            hh = torch.cat(hh).numpy()
-
-        print('embeddings dimension', hh.shape)
-        assert len(hh) == patch_count
-
-        with h5py.File(a.input_path, 'a') as f:
-            if a.overwrite and 'features' in f:
-                print('Overwriting features.')
-                del f[target_name]
-            f.create_dataset(target_name, data=hh)
-
+        tp = TileProcessor(model_name=a.model_name, device='cuda')
+        tp.evaluate_hdf5_file(a.input_path,
+                              batch_size=a.batch_size,
+                              with_latent_features=a.with_latent_features,
+                              overwrite=a.overwrite,
+                              progress='tqdm')
 
 
     class ProcessSlideArgs(CommonArgs):
