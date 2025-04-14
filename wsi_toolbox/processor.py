@@ -20,7 +20,7 @@ import networkx as nx
 import leidenalg as la
 import igraph as ig
 
-from .common import create_model
+from .common import create_model, DEFAULT_MODEL, EMBEDDING_SIZE
 from .utils import find_optimal_components, create_frame, get_platform_font
 from .utils.progress import tqdm_or_st
 
@@ -275,7 +275,7 @@ class WSIProcessor:
 
 
 class TileProcessor:
-    def __init__(self, model_name='gigapath', device='cuda'):
+    def __init__(self, model_name=DEFAULT_MODEL, device='cuda'):
         assert model_name in ['uni', 'gigapath']
         self.model_name = model_name
         self.device = device
@@ -320,7 +320,8 @@ class TileProcessor:
 
                 f.create_dataset(self.feature_name, shape=(patch_count, model.num_features), dtype=np.float32)
                 if with_latent_features:
-                    f.create_dataset(self.latent_feature_name, shape=(patch_count, 256, model.num_features), dtype=np.float32)
+                    # NOTE: using float16 for size efficiencacy
+                    f.create_dataset(self.latent_feature_name, shape=(patch_count, 256, model.num_features), dtype=np.float16)
 
                 tq = tqdm_or_st(batch_idx, backend=progress)
                 for i0, i1 in tq:
@@ -338,7 +339,7 @@ class TileProcessor:
 
                     f[self.feature_name][i0:i1] = cls_feature
                     if with_latent_features:
-                        f[self.latent_feature_name][i0:i1] = latent_feature
+                        f[self.latent_feature_name][i0:i1] = latent_feature.astype(np.float16)
 
                     del x, h_tensor
                     torch.cuda.empty_cache()
@@ -349,16 +350,19 @@ class TileProcessor:
                 done = True
 
             finally:
-                if not done:
+                if done:
+                    print(f'Wrote {self.feature_name}')
+                else:
                     del f[self.feature_name]
                     print(f'ABORTED! deleted {self.feature_name}')
+
                 del model, mean, std
                 torch.cuda.empty_cache()
                 gc.collect()
 
 
 class ClusterProcessor:
-    def __init__(self, hdf5_paths, model_name='gigapath', cluster_name=''):
+    def __init__(self, hdf5_paths, model_name=DEFAULT_MODEL, cluster_name=''):
         assert model_name in ['uni', 'gigapath']
         self.multi = len(hdf5_paths) > 1
         if self.multi:
@@ -542,7 +546,7 @@ class ClusterProcessor:
 
 
 class PreviewClustersProcessor:
-    def __init__(self, hdf5_path, model_name='gigapath', cluster_name='', size=64):
+    def __init__(self, hdf5_path, model_name=DEFAULT_MODEL, cluster_name='', size=64):
         self.hdf5_path = hdf5_path
         self.model_name = model_name
         self.cluster_name = cluster_name
@@ -590,7 +594,7 @@ class PreviewClustersProcessor:
 
 
 class PreviewScoresProcessor:
-    def __init__(self, hdf5_path, model_name='gigapath', score_name='', size=64):
+    def __init__(self, hdf5_path, model_name=DEFAULT_MODEL, score_name='', size=64):
         self.hdf5_path = hdf5_path
         self.model_name = model_name
         self.score_name = score_name

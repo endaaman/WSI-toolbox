@@ -17,6 +17,7 @@ import streamlit as st
 sys.path.append(str(Path(__file__).parent))
 __package__ = 'wsi_toolbox'
 
+from .common import DEFAULT_MODEL, DEFAULT_MODEL_NAME
 from .utils.progress import tqdm_or_st
 from .utils.st import st_horizontal
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
@@ -87,12 +88,12 @@ def get_hdf5_detail(hdf_path):
                     'rows': 0,
                 }
             patch_count = f['metadata/patch_count'][()]
-            has_features = ('gigapath/features' in f) and (len(f['gigapath/features']) == patch_count)
+            has_features = (f'{DEFAULT_MODEL}/features' in f) and (len(f[f'{DEFAULT_MODEL}/features']) == patch_count)
             cluster_names = ['未施行']
-            if 'gigapath' in f:
+            if DEFAULT_MODEL in f:
                 cluster_names = [
                     k.replace('clusters_', '').replace('clusters', 'デフォルト')
-                    for k in f['gigapath'].keys() if re.match(r'^clusters.*', k)
+                    for k in f[DEFAULT_MODEL].keys() if re.match(r'^clusters.*', k)
                 ]
             return {
                 'status': STATUS_READY,
@@ -311,7 +312,7 @@ def main():
             st.image(img)
     elif mode == 'WSI':
         st.subheader('WSIをパッチ分割し特徴量を抽出する', divider=True)
-        st.write('分割したパッチをHDF5に保存し、GigaPath特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
+        st.write(f'分割したパッチをHDF5に保存し、{DEFAULT_MODEL_NAME}特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
 
         do_clustering = st.checkbox('クラスタリングも実行する', value=True, disabled=st.session_state.locked)
 
@@ -338,12 +339,12 @@ def main():
                         os.rename(hdf5_tmp_path, hdf5_path)
                         st.write('HDF5ファイルに変換完了。')
                     if np.any(matched_h5_entry) and matched_h5_entry['detail']['has_features']:
-                        st.write(f'すでにGigaPath特徴量を抽出済みなので処理をスキップしました。')
+                        st.write(f'すでに{DEFAULT_MODEL_NAME}特徴量を抽出済みなので処理をスキップしました。')
                     else:
-                        with st.spinner('GigaPath特徴量を抽出中...', show_time=True):
-                            tp = TileProcessor(model_name='gigapath', device='cuda')
+                        with st.spinner(f'{DEFAULT_MODEL_NAME}特徴量を抽出中...', show_time=True):
+                            tp = TileProcessor(device='cuda')
                             tp.evaluate_hdf5_file(hdf5_path, batch_size=256, overwrite=True, progress='streamlit')
-                        st.write('GigaPath特徴量の抽出完了。')
+                        st.write(f'{DEFAULT_MODEL_NAME}特徴量の抽出完了。')
                     if i < len(selected_files)-1:
                         st.divider()
 
@@ -358,7 +359,7 @@ def main():
                         with st.spinner(f'クラスタリング中...', show_time=True):
                             cluster_proc = ClusterProcessor(
                                     [hdf5_path],
-                                    model_name='gigapath',
+                                    model_name=DEFAULT_MODEL,
                                     cluster_name='')
                             cluster_proc.anlyze_clusters(resolution=1.0, progress='streamlit')
                             cluster_proc.plot_umap(fig_path=umap_path)
@@ -425,14 +426,14 @@ def main():
                     for f in selected_files:
                         if not f['detail']['has_features']:
                             st.write(f'{f["name"]}の特徴量が未抽出なので、抽出を行います。')
-                            tile_proc = TileProcessor(model_name='gigapath', device='cuda')
-                            with st.spinner('GigaPath特徴量を抽出中...', show_time=True):
+                            tile_proc = TileProcessor(model_name=DEFAULT_MODEL, device='cuda')
+                            with st.spinner(f'{DEFAULT_MODEL_NAME}特徴量を抽出中...', show_time=True):
                                 tile_proc.evaluate_hdf5_file(f['path'], batch_size=256, progress='streamlit', overwrite=True)
-                            st.write('GigaPath特徴量の抽出完了。')
+                            st.write(f'{DEFAULT_MODEL_NAME}特徴量の抽出完了。')
 
                     cluster_proc = ClusterProcessor(
                             [f['path'] for f in selected_files],
-                            model_name='gigapath',
+                            model_name=DEFAULT_MODEL,
                             cluster_name=cluster_name)
                     t = 'と'.join([f['name'] for f in selected_files])
                     with st.spinner(f'{t}をクラスタリング中...', show_time=True):

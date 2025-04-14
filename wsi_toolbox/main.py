@@ -157,6 +157,73 @@ class CLI(BaseMLCLI):
             os.system(f'xdg-open {output_path}')
 
 
+    class PreviewLatentPcaArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field('', l='--out', s='-o')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
+        alpha: float = 0.5
+        scale: int = 4
+        open: bool = False
+
+    def run_preview_latent_pca(self, a):
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            output_path = f'{base}_latent_pca.jpg'
+
+        font = ImageFont.truetype(font=get_platform_font(), size=12)
+
+        pca = PCA(n_components=3)
+
+        with h5py.File(a.input_path, 'r') as f:
+            cols = f['metadata/cols'][()]
+            rows = f['metadata/rows'][()]
+            patch_count = f['metadata/patch_count'][()]
+            patch_size = f['metadata/patch_size'][()]
+            coordinates = f['coordinates'][()]
+            print('Loading latent features')
+            h = f[f'{a.model}/latent_features'][()] # B, 256, EMB
+            print('Loaded latent features')
+            h = h.astype(np.float32)
+            s = h.shape
+            print('start PCA')
+            latent_pca = pca.fit_transform(h.reshape(s[0]*s[1], s[-1])) # B*256, 3
+            # latent_pca = latent_pca.reshape(s[0], s[1], 3) # B, 256, 3
+            print('done PCA')
+
+            print(latent_pca.shape)
+
+            scaler = MinMaxScaler()
+            latent_pca = scaler.fit_transform(latent_pca)
+
+            latent_size = int(np.sqrt(s[1]))
+            assert latent_size**2 == s[1]
+            # latent_pca = latent_pca.reshape(s[0], s[1], 3)
+            latent_pca = latent_pca.reshape(s[0], latent_size, latent_size, 3)
+            pca_overlays = (latent_pca*255).astype(np.uint8)
+
+            S = latent_size*a.scale
+            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
+
+            alpha_mask = Image.new('L', (S, S), int(a.alpha*255))
+            for i in tqdm(range(patch_count)):
+                coord = coordinates[i]
+                x, y = coord//patch_size*S
+                patch = f['patches'][i]
+                patch = Image.fromarray(patch)
+                patch = patch.resize((S, S))
+                overlay = Image.fromarray(pca_overlays[i]).convert('RGBA')
+                overlay = overlay.resize((S, S), Image.NEAREST)
+                patch.paste(overlay, (0, 0), alpha_mask)
+                canvas.paste(patch, (x, y, x+S, y+S))
+
+            canvas.save(output_path)
+            print(f'wrote {output_path}')
+
+        if a.open:
+            os.system(f'xdg-open {output_path}')
+
+
     class ProcessPatchesArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         batch_size: int = Field(512, s='-B')
