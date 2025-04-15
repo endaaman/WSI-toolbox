@@ -340,7 +340,7 @@ class TileProcessor:
 
                     h = h_tensor.cpu().detach().numpy() # [B, T+L, H]
                     latent_index = h.shape[1] - latent_size**2
-                    print('latent_index', latent_index)
+                    # print('latent_index', latent_index)
                     cls_feature, latent_feature = h[:, 0, ...], h[:, latent_index:, ...]
 
                     f[self.feature_name][i0:i1] = cls_feature

@@ -19,6 +19,8 @@ from timm.layers import SwiGLUPacked
 DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'gigapath')
 DEFAULT_MODEL_NAME = os.getenv('DEFAULT_MODEL_NAME', 'GigaPath')
 
+print(f'using {DEFAULT_MODEL} as {DEFAULT_MODEL_NAME}')
+
 def create_model(model_name):
     if model_name == 'uni':
         return timm.create_model('hf-hub:MahmoodLab/uni',

@@ -352,7 +352,7 @@ def main():
                 st.write(f'クラスタリングを行います。')
                 with st.container(border=True):
                     for i, (f, hdf5_path) in enumerate(zip(selected_files, hdf5_paths)):
-                        st.write(f'**[{i}/{len(selected_files)}] 処理ファイル: {f["name"]}**')
+                        st.write(f'**[{i+1}/{len(selected_files)}] 処理ファイル: {f["name"]}**')
                         base, ext = os.path.splitext(f['path'])
                         umap_path = f'{base}_umap.png'
                         thumb_path = f'{base}_thumb.jpg'
