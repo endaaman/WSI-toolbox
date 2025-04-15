@@ -170,13 +170,13 @@ class WSIProcessor:
     def __init__(self, image_path, engine='auto', **extra):
         if engine == 'auto':
             ext = os.path.splitext(image_path)[1].lower()
-            print('EXT', ext)
             if ext == '.ndpi':
                 engine = 'tifffile'
             elif ext in ['.jpg', '.jpeg', '.png', '.tif', 'tiff']:
                 engine = 'standard'
             else:
                 engine = 'openslide'
+            print(f'using {engine} engine for {os.path.basename(image_path)}')
 
         self.engine = engine.lower()
         if engine == 'openslide':
