@@ -20,7 +20,7 @@ import networkx as nx
 import leidenalg as la
 import igraph as ig
 
-from .common import create_model, DEFAULT_MODEL, EMBEDDING_SIZE
+from .common import create_model, DEFAULT_MODEL
 from .utils import find_optimal_components, create_frame, get_platform_font
 from .utils.progress import tqdm_or_st
 

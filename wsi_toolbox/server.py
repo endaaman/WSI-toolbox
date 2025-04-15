@@ -329,8 +329,8 @@ def main():
                     hdf5_paths.append(hdf5_path)
                     hdf5_tmp_path = f'{base}.h5.tmp'
                     matched_h5_entry = df[df['path'] == hdf5_path]
-                    matched_h5_entry = matched_h5_entry.iloc[0] if np.any(matched_h5_entry) else None
-                    if np.any(matched_h5_entry) and matched_h5_entry['detail']['status'] == STATUS_READY:
+                    matched_h5_entry = matched_h5_entry.iloc[0] if len(matched_h5_entry)>0 else None
+                    if matched_h5_entry is not None and matched_h5_entry['detail']['status'] == STATUS_READY:
                         st.write(f'すでにHDF5ファイル（{os.path.basename(hdf5_path)}）が存在しているので分割処理をスキップしました。')
                     else:
                         with st.spinner('WSIを分割しHDF5ファイルを構成しています...', show_time=True):
@@ -338,7 +338,7 @@ def main():
                             wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
                         os.rename(hdf5_tmp_path, hdf5_path)
                         st.write('HDF5ファイルに変換完了。')
-                    if np.any(matched_h5_entry) and matched_h5_entry['detail']['has_features']:
+                    if matched_h5_entry is not None and matched_h5_entry['detail']['has_features']:
                         st.write(f'すでに{DEFAULT_MODEL_NAME}特徴量を抽出済みなので処理をスキップしました。')
                     else:
                         with st.spinner(f'{DEFAULT_MODEL_NAME}特徴量を抽出中...', show_time=True):

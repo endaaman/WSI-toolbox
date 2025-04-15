@@ -1,3 +1,4 @@
+import os
 import torch
 import timm
 from timm.layers import SwiGLUPacked
@@ -7,14 +8,16 @@ from timm.layers import SwiGLUPacked
 # DEFAULT_MODEL_NAME = 'UNI'
 # EMBEDDING_SIZE = 1024
 
-DEFAULT_MODEL = 'gigapath'
-DEFAULT_MODEL_NAME = 'GigaPath'
-EMBEDDING_SIZE = 1536
+# DEFAULT_MODEL = 'gigapath'
+# DEFAULT_MODEL_NAME = 'GigaPath'
+# EMBEDDING_SIZE = 1536
 
 # DEFAULT_MODEL = 'virchow2'
 # DEFAULT_MODEL_NAME = 'Virchow2'
 # EMBEDDING_SIZE = 1280
 
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'gigapath')
+DEFAULT_MODEL_NAME = os.getenv('DEFAULT_MODEL_NAME', 'GigaPath')
 
 def create_model(model_name):
     if model_name == 'uni':
