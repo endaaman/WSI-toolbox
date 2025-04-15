@@ -1,7 +1,7 @@
 import re
 import time
 import os
-from pathlib import Path
+from pathlib import Path as P
 import sys
 import warnings
 
@@ -14,7 +14,7 @@ import pandas as pd
 torch.classes.__path__ = []
 import streamlit as st
 
-sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(P(__file__).parent))
 __package__ = 'wsi_toolbox'
 
 from .common import DEFAULT_MODEL, DEFAULT_MODEL_NAME
@@ -69,10 +69,10 @@ STATUS_UNSUPPORTED = 2
 
 def is_wsi_file(file_path):
     extensions = ['.ndpi', '.svs']
-    return Path(file_path).suffix.lower() in extensions
+    return P(file_path).suffix.lower() in extensions
 
 def is_h5_file(file_path):
-    return Path(file_path).suffix.lower() == '.h5'
+    return P(file_path).suffix.lower() == '.h5'
 
 def get_hdf5_detail(hdf_path):
     try:
@@ -119,7 +119,7 @@ def get_hdf5_detail(hdf_path):
 
 IMAGE_EXTENSIONS = { '.bmp', '.gif', '.icns', '.ico', '.jpg', '.jpeg', '.png', '.tif', '.tiff', }
 def is_image_file(file_path):
-    return Path(file_path).suffix.lower() in IMAGE_EXTENSIONS
+    return P(file_path).suffix.lower() in IMAGE_EXTENSIONS
 
 
 def list_files(directory):
@@ -437,12 +437,12 @@ def main():
                             cluster_name=cluster_name)
                     t = 'と'.join([f['name'] for f in selected_files])
                     with st.spinner(f'{t}をクラスタリング中...', show_time=True):
+                        p = P(selected_files[0]['path'])
                         if multi:
-                            dir = os.path.dirname(selected_files[0]['path'])
-                            umap_path = f'{dir}/{cluster_name}.png'
+                            umap_path = str(p.parent / f'{cluster_name}_umap.png')
                         else:
-                            base, ext = os.path.splitext(selected_files[0]['path'])
-                            umap_path = f'{base}_umap.png'
+                            umap_path = str(p.parent / f'{p.stem}_umap.png')
+
                         cluster_proc.anlyze_clusters(resolution=resolution, overwrite=overwrite,
                                                      use_umap_embs=use_umap_embs, progress='streamlit')
                         cluster_proc.plot_umap(fig_path=umap_path)
@@ -457,15 +457,15 @@ def main():
                     with st.spinner('オーバービュー生成中...', show_time=True):
                         for file in selected_files:
                             thumb_proc = PreviewClustersProcessor(file['path'], cluster_name=cluster_name, size=64)
-                            base, ext = os.path.splitext(file['path'])
+                            p = P(file['path'])
                             if multi:
-                                thumb_path = f'{base}_thumb_{cluster_name}.jpg'
+                                thumb_path = str(p.parent / f'{cluster_name}_{p.stem}_thumb.jpg')
                             else:
-                                thumb_path = f'{base}_thumb.jpg'
+                                thumb_path = str(p.parent / f'{p.stem}_thumb.jpg')
                             thumb = thumb_proc.create_thumbnail(progress='streamlit')
                             thumb.save(thumb_path)
                             st.subheader('オーバービュー')
-                            thumb_filename= os.path.basename(thumb_path)
+                            thumb_filename = os.path.basename(thumb_path)
                             st.image(thumb, caption=thumb_filename)
                             st.write(f'{thumb_filename}に出力しました。')
 
