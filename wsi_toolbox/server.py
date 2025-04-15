@@ -324,10 +324,9 @@ def main():
                 for i, f in enumerate(selected_files):
                     st.write(f'**[{i+1}/{len(selected_files)}] 処理中のWSIファイル: {f["name"]}**')
                     wsi_path = f['path']
-                    base = os.path.splitext(wsi_path)[0]
-                    hdf5_path = f'{base}.h5'
-                    hdf5_paths.append(hdf5_path)
-                    hdf5_tmp_path = f'{base}.h5.tmp'
+                    p = P(wsi_path)
+                    hdf5_path = str(p.with_suffix('.h5'))
+                    hdf5_tmp_path = str(p.with_suffix('.h5.tmp'))
                     matched_h5_entry = df[df['path'] == hdf5_path]
                     matched_h5_entry = matched_h5_entry.iloc[0] if len(matched_h5_entry)>0 else None
                     if matched_h5_entry is not None and matched_h5_entry['detail']['status'] == STATUS_READY:
