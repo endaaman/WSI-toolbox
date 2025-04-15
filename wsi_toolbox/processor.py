@@ -276,7 +276,7 @@ class WSIProcessor:
 
 class TileProcessor:
     def __init__(self, model_name=DEFAULT_MODEL, device='cuda'):
-        assert model_name in ['uni', 'gigapath']
+        assert model_name in ['uni', 'gigapath', 'virchow2']
         self.model_name = model_name
         self.device = device
         self.feature_name = f'{model_name}/features'
@@ -294,6 +294,7 @@ class TileProcessor:
         done = False
 
         with h5py.File(hdf5_path, 'r+') as f:
+            latent_size = model.patch_embed.proj.kernel_size[0]
             try:
                 if overwrite:
                     safe_del(f, self.feature_name)
@@ -321,7 +322,9 @@ class TileProcessor:
                 f.create_dataset(self.feature_name, shape=(patch_count, model.num_features), dtype=np.float32)
                 if with_latent_features:
                     # NOTE: using float16 for size efficiencacy
-                    f.create_dataset(self.latent_feature_name, shape=(patch_count, 256, model.num_features), dtype=np.float16)
+                    f.create_dataset(self.latent_feature_name,
+                                     shape=(patch_count, latent_size**2, model.num_features),
+                                     dtype=np.float16)
 
                 tq = tqdm_or_st(batch_idx, backend=progress)
                 for i0, i1 in tq:
@@ -331,11 +334,14 @@ class TileProcessor:
                     x = x.to(self.device)
                     x = (x-mean)/std
 
-                    with torch.no_grad():
+                    # with torch.no_grad():
+                    with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.float16):
                         h_tensor = model.forward_features(x)
 
-                    h = h_tensor.cpu().detach().numpy()
-                    latent_feature, cls_feature = h[:, :-1, ...], h[:, -1, ...]
+                    h = h_tensor.cpu().detach().numpy() # [B, T+L, H]
+                    latent_index = h.shape[1] - latent_size**2
+                    print('latent_index', latent_index)
+                    cls_feature, latent_feature = h[:, 0, ...], h[:, latent_index:, ...]
 
                     f[self.feature_name][i0:i1] = cls_feature
                     if with_latent_features:
@@ -363,7 +369,7 @@ class TileProcessor:
 
 class ClusterProcessor:
     def __init__(self, hdf5_paths, model_name=DEFAULT_MODEL, cluster_name=''):
-        assert model_name in ['uni', 'gigapath']
+        assert model_name in ['uni', 'gigapath', 'virchow2']
         self.multi = len(hdf5_paths) > 1
         if self.multi:
             if not cluster_name:

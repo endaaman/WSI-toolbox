@@ -53,7 +53,7 @@ class CLI(BaseMLCLI):
     class Wsi2h5Args(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
-        patch_size: int = 256
+        patch_size: int = Field(256, s='-S')
         overwrite: bool = Field(False, s='-O')
         engine: str = Field('auto', choices=['auto', 'openslide', 'tifffile'])
         mpp: float = 0
@@ -85,7 +85,7 @@ class CLI(BaseMLCLI):
         output_path: str = Field('', l='--out', s='-o')
         cluster_name: str = Field('', l='--name', s='-N')
         size: int = 64
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'virchow2'])
         open: bool = False
 
     def run_preview(self, a):
@@ -99,6 +99,7 @@ class CLI(BaseMLCLI):
 
         thumb_proc = PreviewClustersProcessor(
                 a.input_path,
+                model_name=a.model,
                 cluster_name=a.cluster_name,
                 size=a.size)
         img = thumb_proc.create_thumbnail(progress='tqdm')
@@ -212,7 +213,18 @@ class CLI(BaseMLCLI):
                 patch = f['patches'][i]
                 patch = Image.fromarray(patch)
                 patch = patch.resize((S, S))
-                overlay = Image.fromarray(pca_overlays[i]).convert('RGBA')
+                overlay = pca_overlays[i]
+                # A = overlay[:, 0, :]
+                # B = overlay[:, -1, :]
+                # overlay[:, 0, :] = B
+                # overlay[:, -1, :] = A
+                # if True:
+                #     alpha_mask = np.array(alpha_mask)
+                #     print(alpha_mask.shape)
+                #     print((overlay[:, :, 0] < 0.8).shape)
+                #     alpha_mask[overlay[:, :, 0] < 0.4] = 0
+                #     alpha_mask = Image.fromarray(alpha_mask)
+                overlay = Image.fromarray(overlay).convert('RGBA')
                 overlay = overlay.resize((S, S), Image.NEAREST)
                 patch.paste(overlay, (0, 0), alpha_mask)
                 canvas.paste(patch, (x, y, x+S, y+S))
@@ -283,7 +295,7 @@ class CLI(BaseMLCLI):
     class ClusterArgs(CommonArgs):
         input_paths: list[str] = Field(..., l='--in', s='-i')
         name: str = ''
-        model: str = Field('gigapath', choices=['gigapath', 'uni'])
+        model: str = Field('gigapath', choices=['gigapath', 'uni', 'virchow2'])
         resolution: float = 1
         use_umap_embs: float = False
         nosave: bool = False

@@ -1,12 +1,19 @@
+import torch
 import timm
+from timm.layers import SwiGLUPacked
 
 
 # DEFAULT_MODEL = 'uni'
 # DEFAULT_MODEL_NAME = 'UNI'
 # EMBEDDING_SIZE = 1024
+
 DEFAULT_MODEL = 'gigapath'
 DEFAULT_MODEL_NAME = 'GigaPath'
 EMBEDDING_SIZE = 1536
+
+# DEFAULT_MODEL = 'virchow2'
+# DEFAULT_MODEL_NAME = 'Virchow2'
+# EMBEDDING_SIZE = 1280
 
 
 def create_model(model_name):
@@ -20,6 +27,12 @@ def create_model(model_name):
         return timm.create_model('hf_hub:prov-gigapath/prov-gigapath',
                                  pretrained=True,
                                  dynamic_img_size=True)
+
+    if model_name == 'virchow2':
+        return timm.create_model("hf-hub:paige-ai/Virchow2",
+                                  pretrained=True,
+                                  mlp_layer=SwiGLUPacked,
+                                  act_layer=torch.nn.SiLU)
 
     raise ValueError('Invalid model_name', model_name)
 
