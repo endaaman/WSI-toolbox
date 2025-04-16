@@ -407,6 +407,7 @@ def main():
             if multi:
                 cluster_name = form.text_input(
                         'クラスタ名（複数スライドで同時クラスタリングを行う場合は、単一条件と区別するための名称が必要になります）',
+                        disabled=st.session_state.locked,
                         value='', placeholder='半角英数字でクラスタ名を入力してください')
                 cluster_name = cluster_name.lower()
 
