@@ -344,6 +344,7 @@ def main():
                             tp = TileProcessor(device='cuda')
                             tp.evaluate_hdf5_file(hdf5_path, batch_size=256, overwrite=True, progress='streamlit')
                         st.write(f'{DEFAULT_MODEL_NAME}特徴量の抽出完了。')
+                    hdf5_paths.append(hdf5_path)
                     if i < len(selected_files)-1:
                         st.divider()
 
