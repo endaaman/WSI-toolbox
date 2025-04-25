@@ -42,8 +42,6 @@ warnings.filterwarnings('ignore', category=FutureWarning, message="You are using
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-
-
 class CLI(BaseMLCLI):
     class CommonArgs(BaseMLArgs):
         # This includes `--seed` param
@@ -166,7 +164,7 @@ class CLI(BaseMLCLI):
         scale: int = 4
         open: bool = False
 
-    def run_preview_latent_pca(self, a):
+    def run_preview_latent_pca(self, a:PreviewArgs):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
@@ -175,7 +173,6 @@ class CLI(BaseMLCLI):
         font = ImageFont.truetype(font=get_platform_font(), size=12)
 
         pca = PCA(n_components=3)
-
         with h5py.File(a.input_path, 'r') as f:
             cols = f['metadata/cols'][()]
             rows = f['metadata/rows'][()]

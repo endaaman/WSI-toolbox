@@ -38,7 +38,7 @@ $ python -m wsi_toolbox.main wsi2h5 -i data/DLBCL-Morph/13952_0.svs -o out/13952
 
 ```
 'patches'                 : パッチのデータ dim:[<patch_count>, <patch_size[0]>, <patch_size[1]>, 3]
-                            ex) [3237, 512, 512, 3] のようなテンソル
+                            ex) [3237, 256, 256, 3] のようなテンソル
 'coordinates'             : 各パッチのピクセル単位の座標 dim:[<patch_count>, 2]
 
 'metadata/original_mpp'   : もともとのmpp
