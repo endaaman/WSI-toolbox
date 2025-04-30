@@ -21,8 +21,9 @@ import leidenalg as la
 import igraph as ig
 
 from .common import create_model, DEFAULT_MODEL
-from .utils import find_optimal_components, create_frame, get_platform_font
+from .utils import create_frame, get_platform_font
 from .utils.progress import tqdm_or_st
+from .utils.analysis import leiden_cluster
 
 
 def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
@@ -368,6 +369,7 @@ class TileProcessor:
                 gc.collect()
 
 
+
 class ClusterProcessor:
     def __init__(self, hdf5_paths, model_name=DEFAULT_MODEL, cluster_name=''):
         assert model_name in ['uni', 'gigapath', 'virchow2']
@@ -425,65 +427,10 @@ class ClusterProcessor:
             print('Skip clustering')
             return
 
-        n_samples = self.scaled_features.shape[0]
-        tq = tqdm_or_st(total=n_samples+5, backend=progress) # UMAP, PCA, KNN, leiden, Finalize
-
-        tq.set_description(f'UMAP projection...')
-        umap_embeddings = self.get_umap_embeddings()
-        tq.update(1)
-
-        tq.set_description(f'Processing PCA...')
-        n_components = find_optimal_components(self.scaled_features)
-        pca = PCA(n_components)
-        target_features = pca.fit_transform(self.scaled_features)
-        tq.update(1)
-
-        tq.set_description(f'Processing KNN...')
-        k = int(np.sqrt(len(target_features)))
-        nn = NearestNeighbors(n_neighbors=k).fit(target_features)
-        distances, indices = nn.kneighbors(target_features)
-        tq.update(1)
-
-        G = nx.Graph()
-        G.add_nodes_from(range(n_samples))
-
-        h = umap_embeddings if use_umap_embs else target_features
-        tq.set_description(f'Processing edges...')
-        for i in range(n_samples):
-            for j in indices[i]:
-                if i == j: # skip self loop
-                    continue
-                if use_umap_embs:
-                    distance = np.linalg.norm(h[i] - h[j])
-                    weight = np.exp(-distance)
-                else:
-                    explained_variance_ratio = pca.explained_variance_ratio_
-                    weighted_diff = (h[i] - h[j]) * np.sqrt(explained_variance_ratio[:len(h[i])])
-                    distance = np.linalg.norm(weighted_diff)
-                    weight = np.exp(-distance / distance.mean())
-                G.add_edge(i, j, weight=weight)
-            tq.update(1)
-
-        tq.set_description(f'Leiden clustering...')
-        edges = list(G.edges())
-        weights = [G[u][v]['weight'] for u, v in edges]
-        ig_graph = ig.Graph(n=n_samples, edges=edges, edge_attrs={'weight': weights})
-
-        partition = la.find_partition(
-            ig_graph,
-            la.RBConfigurationVertexPartition,
-            weights='weight',
-            resolution_parameter=resolution, # maybe most adaptive
-            # resolution_parameter=1.0, # maybe most adaptive
-            # resolution_parameter=0.5, # more coarse cluster
-        )
-        tq.update(1)
-
-        tq.set_description(f'Finalize...')
-        clusters = np.full(n_samples, -1)  # Initialize all as noise
-        for i, community in enumerate(partition):
-            for node in community:
-                clusters[node] = i
+        clusters = leiden_cluster(self.scaled_features,
+                                  umap_emb_func=self.get_umap_embeddings,
+                                  resolution=resolution,
+                                  progress=progress)
 
         n_clusters = len(set(clusters)) - (1 if -1 in clusters else 0)
         n_noise = list(clusters).count(-1)

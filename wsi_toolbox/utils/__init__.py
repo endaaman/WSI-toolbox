@@ -20,15 +20,6 @@ def yes_no_prompt(question):
     return response == "" or response.startswith("y")
 
 
-def find_optimal_components(features, threshold=0.95):
-    pca = PCA()
-    pca.fit(features)
-    explained_variance = pca.explained_variance_ratio_
-    # 累積寄与率が95%を超える次元数を選択する例
-    cumulative_variance = np.cumsum(explained_variance)
-    optimal_n = np.argmax(cumulative_variance >= threshold) + 1
-    return min(optimal_n, len(features) - 1)
-
 
 def get_platform_font():
     if sys.platform == 'win32':

@@ -29,8 +29,9 @@ from gigapath import slide_encoder
 
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
 from .common import create_model
-from .utils import hover_images_on_scatters, find_optimal_components, create_frame, get_platform_font
+from .utils import hover_images_on_scatters, create_frame, get_platform_font
 from .utils.cli import BaseMLCLI, BaseMLArgs
+from .utils.analysis import leiden_cluster
 from .utils.progress import tqdm_or_st
 
 
@@ -396,44 +397,47 @@ class CLI(BaseMLCLI):
             plt.show()
 
 
-    class AlignKeysArgs(CommonArgs):
+    class ClusterLatentArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
+        name: str = ''
+        model: str = Field('gigapath', choices=['gigapath', 'uni', 'virchow2'])
+        resolution: float = 1
+        use_umap_embs: float = False
+        nosave: bool = False
+        noshow: bool = False
+        overwrite: bool = Field(False, s='-O')
 
-    def run_align_keys(self, a):
-        with h5py.File(a.input_path, 'a') as f:
-            if 'features' in f:
-                features = f['features'][:]
-                if 'gigapath/features' in f:
-                    print('"gigapath/features" already exists')
-                else:
-                    f.create_dataset('gigapath/features', data=features)
-                    print('"gigapath/features" was added')
-                del f['features']
-                print('"features" has been deleted')
-            else:
-                if 'gigapath/features' in f:
-                    print('features OK')
-                else:
-                    print('Both "features" and "gigapath/features" do not exist')
+    def run_cluster_latent(self, a):
+        with h5py.File(a.input_path, 'r') as f:
+            patch_count = f['metadata/patch_count'][()]
+            features = f[f'{a.model}/latent_features'][:]
 
-            if 'slide_feature' in f:
-                slide_feature = f['slide_feature'][:]
-                if 'gigapath/slide_feature' in f:
-                    print('"gigapath/slide_feature" already exists')
-                else:
-                    f.create_dataset('gigapath/slide_feature', data=slide_feature)
-                    print('"gigapath/slide_feature" was added')
+        # if len(a.input_path) > 1:
+        #     # multiple
+        #     dir = os.path.dirname(a.input_paths[0])
+        #     fig_path = f'{dir}/{a.name}.png'
+        # else:
+        #     base, ext = os.path.splitext(a.input_paths[0])
+        #     fig_path = f'{base}_umap.png'
 
-                del f['slide_feature']
-                print('"slide_feature" has been deleted')
-            else:
-                if 'gigapath/slide_feature' in f:
-                    print('slide_feature OK')
-                else:
-                    print('Both "slide_feature" and "gigapath/slide_feature" do not exist')
 
-        # img  = (img*256).astype(np.uint8)
-        # Image.fromarray(img).resize((256, 256), Image.NEAREST).save('1.png')
+        s = features.shape
+        h = features.reshape(s[0]*s[1], s[-1]) # B*16*16, 3
+
+        print(h.shape)
+        clusters = leiden_cluster(h, None, a.resolution, 'tqdm')
+
+        print(clusters.shape)
+        print(clusters[:10])
+
+        # fig = cluster_proc.plot_umap()
+        # if not a.nosave:
+        #     fig.savefig(fig_path)
+        #     print(f'wrote {fig_path}')
+        #
+        # if not a.noshow:
+        #     plt.show()
+
 
 
 if __name__ == '__main__':

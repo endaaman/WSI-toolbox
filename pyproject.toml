@@ -18,6 +18,7 @@ dependencies = [
     "h5py>=3.13.0",
     "hdbscan>=0.8.40",
     "imagecodecs>=2024.12.30",
+    "joblib>=1.4.2",
     "leidenalg>=0.10.2",
     "matplotlib>=3.9.4",
     "networkx>=3.3",
