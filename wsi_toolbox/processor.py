@@ -21,7 +21,7 @@ import leidenalg as la
 import igraph as ig
 
 from .common import create_model, DEFAULT_MODEL, DEFAULT_BACKEND
-from .utils import create_frame, get_platform_font
+from .utils import create_frame, get_platform_font, plot_umap
 from .utils.progress import tqdm_or_st
 from .utils.analysis import leiden_cluster
 
@@ -452,43 +452,10 @@ class ClusterProcessor:
     def plot_umap(self, fig_path=None):
         if not np.any(self.clusters):
             raise RuntimeError('Compute clusters before umap projection.')
-        clusters = self.clusters
-        cluster_ids = sorted(list(set(clusters)))
 
-        umap_embeddings = self.get_umap_embeddings()
-        fig, ax = plt.subplots(figsize=(10, 8))
-        cmap = plt.get_cmap('tab20')
+        fig = plot_umap(embeddings=self.get_umap_embeddings(),
+                        clusters=self.clusters)
 
-        for i, cluster_id in enumerate(cluster_ids):
-            coords = umap_embeddings[clusters == cluster_id]
-            if cluster_id == -1:
-                color = 'black'
-                label = 'Noise'
-                size = 12
-            else:
-                color = [cmap(cluster_id % 20)]
-                label = f'Cluster {cluster_id}'
-                size = 7
-            plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
-
-        for cluster_id in cluster_ids:
-            if cluster_id < 0:
-                continue
-            cluster_points = umap_embeddings[clusters == cluster_id]
-            if len(cluster_points) < 1:
-                continue
-            centroid_x = np.mean(cluster_points[:, 0])
-            centroid_y = np.mean(cluster_points[:, 1])
-            ax.text(centroid_x, centroid_y, str(cluster_id),
-                   fontsize=12, fontweight='bold',
-                   ha='center', va='center',
-                   bbox=dict(facecolor='white', alpha=0.1, edgecolor='none'))
-
-        plt.title(f'UMAP + Clustering')
-        plt.xlabel('UMAP Dimension 1')
-        plt.ylabel('UMAP Dimension 2')
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
         if fig_path is not None:
             plt.savefig(fig_path, bbox_inches='tight', pad_inches=0.5)
             print(f'wrote {fig_path}')

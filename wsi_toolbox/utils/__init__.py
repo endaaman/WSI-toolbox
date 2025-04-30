@@ -20,7 +20,6 @@ def yes_no_prompt(question):
     return response == "" or response.startswith("y")
 
 
-
 def get_platform_font():
     if sys.platform == 'win32':
         # Windows
@@ -46,6 +45,45 @@ def create_frame(size, color, text, font):
     draw.text((1, 1), text, font=font, fill=text_color)
     return frame
 
+
+def plot_umap(embeddings, clusters, title="UMAP + Clustering", figsize=(10, 8)):
+    cluster_ids = sorted(list(set(clusters)))
+
+    fig, ax = plt.subplots(figsize=figsize)
+    cmap = plt.get_cmap('tab20')
+
+    for i, cluster_id in enumerate(cluster_ids):
+        coords = embeddings[clusters == cluster_id]
+        if cluster_id == -1:
+            color = 'black'
+            label = 'Noise'
+            size = 12
+        else:
+            color = [cmap(cluster_id % 20)]
+            label = f'Cluster {cluster_id}'
+            size = 7
+        plt.scatter(coords[:, 0], coords[:, 1], s=size, c=color, label=label)
+
+    for cluster_id in cluster_ids:
+        if cluster_id < 0:
+            continue
+        cluster_points = embeddings[clusters == cluster_id]
+        if len(cluster_points) < 1:
+            continue
+        centroid_x = np.mean(cluster_points[:, 0])
+        centroid_y = np.mean(cluster_points[:, 1])
+        ax.text(centroid_x, centroid_y, str(cluster_id),
+               fontsize=12, fontweight='bold',
+               ha='center', va='center',
+               bbox=dict(facecolor='white', alpha=0.1, edgecolor='none'))
+
+    plt.title(title)
+    plt.xlabel('UMAP Dimension 1')
+    plt.ylabel('UMAP Dimension 2')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+
+    return fig
 
 
 def hover_images_on_scatters(scatters, imagess, ax=None, offset=(150, 30)):

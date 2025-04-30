@@ -32,7 +32,7 @@ from gigapath import slide_encoder
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, \
         PreviewClustersProcessor, PreviewScoresProcessor, PreviewLatentPCAProcessor, PreviewLatentClusterProcessor
 from .common import create_model
-from .utils import hover_images_on_scatters, create_frame, get_platform_font
+from .utils import plot_umap
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.analysis import leiden_cluster
 from .utils.progress import tqdm_or_st
@@ -80,120 +80,6 @@ class CLI(BaseMLCLI):
         p.convert_to_hdf5(output_path, patch_size=a.patch_size, progress='tqdm')
 
         print('done')
-
-
-    class PreviewArgs(CommonArgs):
-        input_path: str = Field(..., l='--in', s='-i')
-        output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'virchow2'])
-        cluster_name: str = Field('', l='--name', s='-N')
-        size: int = 64
-        open: bool = False
-
-    def run_preview(self, a):
-        output_path = a.output_path
-        if not output_path:
-            base, ext = os.path.splitext(a.input_path)
-            if a.cluster_name:
-                output_path = f'{base}_thumb_{a.cluster_name}.jpg'
-            else:
-                output_path = f'{base}_thumb.jpg'
-
-        proc = PreviewClustersProcessor(
-                a.input_path,
-                model_name=a.model,
-                size=a.size)
-        img = proc.create_thumbnail(
-                cluster_name=a.cluster_name,
-                progress='tqdm')
-        img.save(output_path)
-        print(f'wrote {output_path}')
-
-        if a.open:
-            os.system(f'xdg-open {output_path}')
-
-
-    class PreviewScoresArgs(CommonArgs):
-        input_path: str = Field(..., l='--in', s='-i')
-        output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
-        score_name: str = Field(..., l='--name', s='-N')
-        size: int = 64
-        open: bool = False
-
-    def run_preview_scores(self, a):
-        output_path = a.output_path
-        if not output_path:
-            base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_thumb_score_{a.score_name}.jpg'
-
-        proc = PreviewScoresProcessor(
-                a.input_path,
-                model_name=a.model,
-                size=a.size)
-        img = proc.create_thumbnail(
-                score_name=a.score_name,
-                progress='tqdm')
-        img.save(output_path)
-        print(f'wrote {output_path}')
-
-        if a.open:
-            os.system(f'xdg-open {output_path}')
-
-
-    class PreviewLatentPcaArgs(CommonArgs):
-        input_path: str = Field(..., l='--in', s='-i')
-        output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
-        alpha: float = 0.5
-        size: int = 64
-        open: bool = False
-
-    def run_preview_latent_pca(self, a:PreviewArgs):
-        output_path = a.output_path
-        if not output_path:
-            base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_latent_pca.jpg'
-
-        proc = PreviewLatentPCAProcessor(
-                a.input_path,
-                model_name=a.model,
-                size=a.size)
-        img = proc.create_thumbnail(
-                progress='tqdm')
-        img.save(output_path)
-        print(f'wrote {output_path}')
-
-        if a.open:
-            os.system(f'xdg-open {output_path}')
-
-
-    class PreviewLatentArgs(CommonArgs):
-        input_path: str = Field(..., l='--in', s='-i')
-        output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
-        alpha: float = 0.5
-        size: int = 64
-        open: bool = False
-
-    def run_preview_latent(self, a:PreviewArgs):
-        output_path = a.output_path
-        if not output_path:
-            base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_latent_clusters.jpg'
-
-        proc = PreviewLatentClusterProcessor(
-                a.input_path,
-                model_name=a.model,
-                size=a.size)
-        img = proc.create_thumbnail(
-                progress='tqdm')
-        img.save(output_path)
-        print(f'wrote {output_path}')
-
-        if a.open:
-            os.system(f'xdg-open {output_path}')
-
 
 
     class ProcessPatchesArgs(CommonArgs):
@@ -374,33 +260,171 @@ class CLI(BaseMLCLI):
 
     def run_cluster_latent(self, a):
         target_path = f'{a.model}/latent_clusters'
+        skip = False
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
             features = f[f'{a.model}/latent_features'][:]
             if target_path in f:
                 if a.overwrite:
-                    print(f'overwriting old {target_path}..')
+                    print(f'overwriting old {target_path} of {a.input_path}')
                 else:
-                    raise RuntimeError(f'{target_path} already exists in {a.input_path}')
+                    skip = True
+                    clusters = f[target_path][:]
+                    # raise RuntimeError(f'{target_path} already exists in {a.input_path}')
 
+        # scaler = StandardScaler()
+        # features = scaler.fit_transform(features)
         s = features.shape
-        print(s)
         h = features.reshape(s[0]*s[1], s[-1]) # B*16*16, 3
-        print(h.shape)
 
-        clusters = leiden_cluster(h,
-                                  umap_emb_func=None,
-                                  resolution=a.resolution,
-                                  n_jobs=-1,
-                                  progress='tqdm')
+        if not skip:
+            clusters = leiden_cluster(h,
+                                      umap_emb_func=None,
+                                      resolution=a.resolution,
+                                      n_jobs=-1,
+                                      progress='tqdm')
 
-        clusters = clusters.reshape(s[0], s[1])
-        print(clusters.shape)
+            clusters = clusters.reshape(s[0], s[1])
 
-        with h5py.File(a.input_path, 'a') as f:
-            if target_path in f:
-                del f[target_path]
-            f.create_dataset(target_path, data=clusters)
+            with h5py.File(a.input_path, 'a') as f:
+                if target_path in f:
+                    del f[target_path]
+                f.create_dataset(target_path, data=clusters)
+
+        print(features.reshape(s[0]*s[1], -1).shape)
+        print(clusters.reshape(s[0]*s[1]).shape)
+
+        reducer = umap.UMAP(
+                # n_neighbors=30,
+                # min_dist=0.05,
+                n_components=2,
+                # random_state=a.seed
+            )
+
+        embs = reducer.fit_transform(features.reshape(s[0]*s[1], -1))
+        fig = plot_umap(
+                embeddings=embs,
+                clusters=clusters.reshape(s[0]*s[1]))
+        if not a.nosave:
+            p = P(a.input_path)
+            fig_path = str(p.parent / f'{p.stem}_latent_umap.png')
+            plt.savefig(fig_path)
+            print(f'wrote {fig_path}')
+        plt.show()
+
+
+
+    class PreviewArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field('', l='--out', s='-o')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'virchow2'])
+        cluster_name: str = Field('', l='--name', s='-N')
+        size: int = 64
+        open: bool = False
+
+    def run_preview(self, a):
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            if a.cluster_name:
+                output_path = f'{base}_thumb_{a.cluster_name}.jpg'
+            else:
+                output_path = f'{base}_thumb.jpg'
+
+        proc = PreviewClustersProcessor(
+                a.input_path,
+                model_name=a.model,
+                size=a.size)
+        img = proc.create_thumbnail(
+                cluster_name=a.cluster_name,
+                progress='tqdm')
+        img.save(output_path)
+        print(f'wrote {output_path}')
+
+        if a.open:
+            os.system(f'xdg-open {output_path}')
+
+
+    class PreviewScoresArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field('', l='--out', s='-o')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
+        score_name: str = Field(..., l='--name', s='-N')
+        size: int = 64
+        open: bool = False
+
+    def run_preview_scores(self, a):
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            output_path = f'{base}_thumb_score_{a.score_name}.jpg'
+
+        proc = PreviewScoresProcessor(
+                a.input_path,
+                model_name=a.model,
+                size=a.size)
+        img = proc.create_thumbnail(
+                score_name=a.score_name,
+                progress='tqdm')
+        img.save(output_path)
+        print(f'wrote {output_path}')
+
+        if a.open:
+            os.system(f'xdg-open {output_path}')
+
+
+    class PreviewLatentPcaArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field('', l='--out', s='-o')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
+        alpha: float = 0.5
+        size: int = 64
+        open: bool = False
+
+    def run_preview_latent_pca(self, a:PreviewArgs):
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            output_path = f'{base}_latent_pca.jpg'
+
+        proc = PreviewLatentPCAProcessor(
+                a.input_path,
+                model_name=a.model,
+                size=a.size)
+        img = proc.create_thumbnail(
+                progress='tqdm')
+        img.save(output_path)
+        print(f'wrote {output_path}')
+
+        if a.open:
+            os.system(f'xdg-open {output_path}')
+
+
+    class PreviewLatentArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field('', l='--out', s='-o')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
+        alpha: float = 0.5
+        size: int = 64
+        open: bool = False
+
+    def run_preview_latent(self, a:PreviewArgs):
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            output_path = f'{base}_latent_clusters.jpg'
+
+        proc = PreviewLatentClusterProcessor(
+                a.input_path,
+                model_name=a.model,
+                size=a.size)
+        img = proc.create_thumbnail(
+                progress='tqdm')
+        img.save(output_path)
+        print(f'wrote {output_path}')
+
+        if a.open:
+            os.system(f'xdg-open {output_path}')
 
 
 
