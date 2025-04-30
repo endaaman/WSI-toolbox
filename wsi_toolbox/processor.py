@@ -20,7 +20,7 @@ import networkx as nx
 import leidenalg as la
 import igraph as ig
 
-from .common import create_model, DEFAULT_MODEL
+from .common import create_model, DEFAULT_MODEL, DEFAULT_BACKEND
 from .utils import create_frame, get_platform_font
 from .utils.progress import tqdm_or_st
 from .utils.analysis import leiden_cluster
@@ -202,7 +202,7 @@ class WSIProcessor:
         self.mpp = self.original_mpp * self.scale
 
 
-    def convert_to_hdf5(self, hdf5_path, patch_size=256, progress='tqdm'):
+    def convert_to_hdf5(self, hdf5_path, patch_size=256, progress=DEFAULT_BACKEND):
         S = patch_size   # Scaled patch size
         T = S*self.scale # Original patch size
         W, H = self.wsi.get_original_size()
@@ -286,7 +286,7 @@ class TileProcessor:
 
     def evaluate_hdf5_file(self, hdf5_path, batch_size=256,
                            with_latent_features=False,
-                           overwrite=False, progress='tqdm'):
+                           overwrite=False, progress=DEFAULT_BACKEND):
         model = create_model(self.model_name)
         model = model.eval().to(self.device)
 
@@ -422,7 +422,7 @@ class ClusterProcessor:
         return embs
 
 
-    def anlyze_clusters(self, resolution=1.0, use_umap_embs=False, overwrite=False, progress='tqdm'):
+    def anlyze_clusters(self, resolution=1.0, use_umap_embs=False, overwrite=False, progress=DEFAULT_BACKEND):
         if np.any(self.clusters) and not overwrite:
             print('Skip clustering')
             return
@@ -445,9 +445,6 @@ class ClusterProcessor:
                 if self.clusters_path in f:
                     del f[self.clusters_path]
                 f.create_dataset(self.clusters_path, data=cc)
-
-        tq.update(1)
-        tq.close()
 
         self.clusters = clusters
 
@@ -498,86 +495,80 @@ class ClusterProcessor:
         return fig
 
 
-
-class PreviewClustersProcessor:
-    def __init__(self, hdf5_path, model_name=DEFAULT_MODEL, cluster_name='', size=64):
+class BasePreviewProcessor:
+    def __init__(self, hdf5_path, model_name=DEFAULT_MODEL, size=64):
         self.hdf5_path = hdf5_path
         self.model_name = model_name
-        self.cluster_name = cluster_name
-        self.draw_clusters = cluster_name is not None
         self.size = size
 
-    def create_thumbnail(self, font_size=16, progress='tqdm'):
+    def load(self, f):
+        pass
+
+    def render_patch(self, f, i, patch):
+        return patch
+
+    def create_thumbnail(self, progress='tqdm', **kwargs):
         S = self.size
         with h5py.File(self.hdf5_path, 'r') as f:
-            cols = f['metadata/cols'][()]
-            rows = f['metadata/rows'][()]
-            patch_count = f['metadata/patch_count'][()]
-            patch_size = f['metadata/patch_size'][()]
+            self.cols = f['metadata/cols'][()]
+            self.rows = f['metadata/rows'][()]
+            self.patch_count = f['metadata/patch_count'][()]
+            self.patch_size = f['metadata/patch_size'][()]
+            self.load(f, **kwargs)
 
-            clusters = []
-            if self.draw_clusters:
-                # if None, clusters would be empty
-                cluster_path = f'{self.model_name}/clusters'
-                if self.cluster_name:
-                    cluster_path += f'_{self.cluster_name}'
-                clusters = f[cluster_path][:]
-
-            font = ImageFont.truetype(font=get_platform_font(), size=font_size)
-
-            cmap = plt.get_cmap('tab20')
-            frames = {}
-            if self.draw_clusters:
-                for cluster in np.unique(clusters).tolist() + [-1]:
-                    color = mcolors.rgb2hex(cmap(cluster)[:3]) if cluster >= 0 else '#111'
-                    frames[cluster] = create_frame(S, color, f'{cluster}', font)
-
-            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
-            tq = tqdm_or_st(range(patch_count), backend=progress)
+            canvas = Image.new('RGB', (self.cols*S, self.rows*S), (0,0,0))
+            tq = tqdm_or_st(range(self.patch_count), backend=progress)
             for i in tq:
                 coord = f['coordinates'][i]
-                x, y = coord//patch_size*S
+                x, y = coord//self.patch_size*S
                 patch = f['patches'][i]
                 patch = Image.fromarray(patch).resize((S, S))
-                if self.draw_clusters:
-                    frame = frames[clusters[i]]
-                    patch.paste(frame, (0, 0), frame)
+                patch = self.render_patch(f, i, patch)
                 canvas.paste(patch, (x, y, x+S, y+S))
 
         return canvas
 
 
-class PreviewScoresProcessor:
-    def __init__(self, hdf5_path, model_name=DEFAULT_MODEL, score_name='', size=64):
-        self.hdf5_path = hdf5_path
-        self.model_name = model_name
-        self.score_name = score_name
-        self.size = size
+class PreviewClustersProcessor(BasePreviewProcessor):
+    def load(self, f, **kwargs):
+        font_size = kwargs.pop('font_size', 16)
+        self.cluster_name = kwargs.pop('cluster_name', '')
 
-    def create_thumbnail(self, progress='tqdm'):
-        S = self.size
-        with h5py.File(self.hdf5_path, 'r') as f:
-            cols = f['metadata/cols'][()]
-            rows = f['metadata/rows'][()]
-            patch_count = f['metadata/patch_count'][()]
-            patch_size = f['metadata/patch_size'][()]
-            coordinates = f['coordinates'][()]
-            scores = f[f'{a.model}/scores_{self.score_name}'][()]
+        clusters = []
+        # if None, clusters would be empty
+        cluster_path = f'{self.model_name}/clusters'
+        if self.cluster_name:
+            cluster_path += f'_{self.cluster_name}'
+        self.clusters = f[cluster_path][:]
 
-            print('Filtered scores:', scores[scores > 0].shape)
+        font = ImageFont.truetype(font=get_platform_font(), size=font_size)
 
-            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
-            for i in tqdm(range(patch_count)):
-                coord = coordinates[i]
-                x, y = coord//patch_size*S
-                patch = f['patches'][i]
-                patch = Image.fromarray(patch).resize((S, S))
-                score = scores[i]
-                if not np.isnan(score):
-                    color = mcolors.rgb2hex(cmap(score)[:3])
-                    frame = create_frame(S, color, f'{score:.3f}', font)
-                    patch.paste(frame, (0, 0), frame)
-                canvas.paste(patch, (x, y, x+S, y+S))
+        cmap = plt.get_cmap('tab20')
+        self.frames = {}
+        for cluster in np.unique(clusters).tolist() + [-1]:
+            color = mcolors.rgb2hex(cmap(cluster)[:3]) if cluster >= 0 else '#111'
+            self.frames[cluster] = create_frame(self.size, color, f'{cluster}', font)
 
-            canvas.save(output_path)
-            print(f'wrote {output_path}')
+    def render_patch(self, f, i, patch):
+        frame = self.frames[self.clusters[i]]
+        patch.paste(frame, (0, 0), frame)
+        return patch
+
+
+
+class PreviewScoresProcessor(BasePreviewProcessor):
+    def load(self, f, **kwargs):
+        font_size = kwargs.pop('font_size', 16)
+        score_name = kwargs.pop('score_name', '')
+
+        self.font = ImageFont.truetype(font=get_platform_font(), size=font_size)
+        self.scores = f[f'{self.model_name}/scores_{score_name}'][()]
+        self.cmap = plt.get_cmap('viridis')
+
+    def render_patch(self, f, i, patch):
+        score = self.scores[i]
+        if not np.isnan(score):
+            color = mcolors.rgb2hex(self.cmap(score)[:3])
+            frame = create_frame(self.size, color, f'{score:.3f}', self.font)
+            patch.paste(frame, (0, 0), frame)
+        return patch

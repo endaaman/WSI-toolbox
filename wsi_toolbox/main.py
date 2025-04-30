@@ -2,6 +2,8 @@ import os
 import sys
 import warnings
 from glob import glob
+from pathlib import Path as P
+
 from tqdm import tqdm
 from pydantic import Field
 from PIL import Image, ImageDraw, ImageFont
@@ -27,7 +29,7 @@ from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
-from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
+from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor, PreviewScoresProcessor
 from .common import create_model
 from .utils import hover_images_on_scatters, create_frame, get_platform_font
 from .utils.cli import BaseMLCLI, BaseMLArgs
@@ -82,9 +84,9 @@ class CLI(BaseMLCLI):
     class PreviewArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'virchow2'])
         cluster_name: str = Field('', l='--name', s='-N')
         size: int = 64
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'virchow2'])
         open: bool = False
 
     def run_preview(self, a):
@@ -99,10 +101,12 @@ class CLI(BaseMLCLI):
         thumb_proc = PreviewClustersProcessor(
                 a.input_path,
                 model_name=a.model,
-                cluster_name=a.cluster_name,
                 size=a.size)
-        img = thumb_proc.create_thumbnail(progress='tqdm')
+        img = thumb_proc.create_thumbnail(
+                cluster_name=a.cluster_name,
+                progress='tqdm')
         img.save(output_path)
+        print(f'wrote {output_path}')
 
         if a.open:
             os.system(f'xdg-open {output_path}')
@@ -111,53 +115,32 @@ class CLI(BaseMLCLI):
     class PreviewScoresArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
-        name: str
-        size: int = 64
         model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
+        score_name: str = Field(..., l='--name', s='-N')
+        size: int = 64
         open: bool = False
 
     def run_preview_scores(self, a):
-        S = a.size
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_scores_{a.name}.jpg'
+            output_path = f'{base}_thumb_score_{a.score_name}.jpg'
 
-        cmap = plt.get_cmap('viridis')
-        font = ImageFont.truetype(font=get_platform_font(), size=12)
-
-        with h5py.File(a.input_path, 'r') as f:
-            cols = f['metadata/cols'][()]
-            rows = f['metadata/rows'][()]
-            patch_count = f['metadata/patch_count'][()]
-            patch_size = f['metadata/patch_size'][()]
-            coordinates = f['coordinates'][()]
-            scores = f[f'{a.model}/scores_{a.name}'][()]
-
-            print('Filtered scores:', scores[scores > 0].shape)
-
-            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
-            for i in tqdm(range(patch_count)):
-                coord = coordinates[i]
-                x, y = coord//patch_size*S
-                patch = f['patches'][i]
-                patch = Image.fromarray(patch)
-                patch = patch.resize((S, S))
-                score = scores[i]
-                if not np.isnan(score):
-                    color = mcolors.rgb2hex(cmap(score)[:3])
-                    frame = create_frame(S, color, f'{score:.3f}', font)
-                    patch.paste(frame, (0, 0), frame)
-                canvas.paste(patch, (x, y, x+S, y+S))
-
-            canvas.save(output_path)
-            print(f'wrote {output_path}')
+        thumb_proc = PreviewScoresProcessor(
+                a.input_path,
+                model_name=a.model,
+                size=a.size)
+        img = thumb_proc.create_thumbnail(
+                score_name=a.score_name,
+                progress='tqdm')
+        img.save(output_path)
+        print(f'wrote {output_path}')
 
         if a.open:
             os.system(f'xdg-open {output_path}')
 
 
-    class PreviewLatentPcaArgs(CommonArgs):
+    class PreviewLatentArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
         model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
@@ -165,7 +148,7 @@ class CLI(BaseMLCLI):
         scale: int = 4
         open: bool = False
 
-    def run_preview_latent_pca(self, a:PreviewArgs):
+    def run_preview_latent(self, a:PreviewArgs):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
@@ -182,50 +165,52 @@ class CLI(BaseMLCLI):
             coordinates = f['coordinates'][()]
             print('Loading latent features')
             h = f[f'{a.model}/latent_features'][()] # B, 256, EMB
-            print('Loaded latent features')
-            h = h.astype(np.float32)
-            s = h.shape
-            print('start PCA')
-            latent_pca = pca.fit_transform(h.reshape(s[0]*s[1], s[-1])) # B*256, 3
-            # latent_pca = latent_pca.reshape(s[0], s[1], 3) # B, 256, 3
-            print('done PCA')
 
-            print(latent_pca.shape)
+        print('Loaded latent features')
 
-            scaler = MinMaxScaler()
-            latent_pca = scaler.fit_transform(latent_pca)
+        h = h.astype(np.float32)
+        s = h.shape
+        print('start PCA')
+        latent_pca = pca.fit_transform(h.reshape(s[0]*s[1], s[-1])) # B*256, 3
+        # latent_pca = latent_pca.reshape(s[0], s[1], 3) # B, 256, 3
+        print('done PCA')
 
-            latent_size = int(np.sqrt(s[1]))
-            assert latent_size**2 == s[1]
-            # latent_pca = latent_pca.reshape(s[0], s[1], 3)
-            latent_pca = latent_pca.reshape(s[0], latent_size, latent_size, 3)
-            pca_overlays = (latent_pca*255).astype(np.uint8)
+        print(latent_pca.shape)
 
-            S = latent_size*a.scale
-            canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
+        scaler = MinMaxScaler()
+        latent_pca = scaler.fit_transform(latent_pca)
 
-            alpha_mask = Image.new('L', (S, S), int(a.alpha*255))
-            for i in tqdm(range(patch_count)):
-                coord = coordinates[i]
-                x, y = coord//patch_size*S
-                patch = f['patches'][i]
-                patch = Image.fromarray(patch)
-                patch = patch.resize((S, S))
-                overlay = pca_overlays[i]
-                # A = overlay[:, 0, :]
-                # B = overlay[:, -1, :]
-                # overlay[:, 0, :] = B
-                # overlay[:, -1, :] = A
-                # if True:
-                #     alpha_mask = np.array(alpha_mask)
-                #     print(alpha_mask.shape)
-                #     print((overlay[:, :, 0] < 0.8).shape)
-                #     alpha_mask[overlay[:, :, 0] < 0.4] = 0
-                #     alpha_mask = Image.fromarray(alpha_mask)
-                overlay = Image.fromarray(overlay).convert('RGBA')
-                overlay = overlay.resize((S, S), Image.NEAREST)
-                patch.paste(overlay, (0, 0), alpha_mask)
-                canvas.paste(patch, (x, y, x+S, y+S))
+        latent_size = int(np.sqrt(s[1]))
+        assert latent_size**2 == s[1]
+        # latent_pca = latent_pca.reshape(s[0], s[1], 3)
+        latent_pca = latent_pca.reshape(s[0], latent_size, latent_size, 3)
+        pca_overlays = (latent_pca*255).astype(np.uint8)
+
+        S = latent_size*a.scale
+        canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
+
+        alpha_mask = Image.new('L', (S, S), int(a.alpha*255))
+        for i in tqdm(range(patch_count)):
+            coord = coordinates[i]
+            x, y = coord//patch_size*S
+            patch = f['patches'][i]
+            patch = Image.fromarray(patch)
+            patch = patch.resize((S, S))
+            overlay = pca_overlays[i]
+            # A = overlay[:, 0, :]
+            # B = overlay[:, -1, :]
+            # overlay[:, 0, :] = B
+            # overlay[:, -1, :] = A
+            # if True:
+            #     alpha_mask = np.array(alpha_mask)
+            #     print(alpha_mask.shape)
+            #     print((overlay[:, :, 0] < 0.8).shape)
+            #     alpha_mask[overlay[:, :, 0] < 0.4] = 0
+            #     alpha_mask = Image.fromarray(alpha_mask)
+            overlay = Image.fromarray(overlay).convert('RGBA')
+            overlay = overlay.resize((S, S), Image.NEAREST)
+            patch.paste(overlay, (0, 0), alpha_mask)
+            canvas.paste(patch, (x, y, x+S, y+S))
 
             canvas.save(output_path)
             print(f'wrote {output_path}')
@@ -331,17 +316,17 @@ class CLI(BaseMLCLI):
     class ClusterScoresArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         name: str = Field(...)
-        target_clusters: list[int] = Field(..., s='-T')
-        model: str = Field('gigapath', l='--cluster', s='-C', choice=['gigapath', 'uni', 'unified', 'none'])
+        clusters: list[int] = Field([], s='-C')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
         scaler: str = Field('minmax', choices=['std', 'minmax'])
         noshow: bool = False
-        fig: str = ''
+        nosave: bool = False
 
     def run_cluster_scores(self, a):
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
             clusters = f[f'{a.model}/clusters'][:]
-            mask = np.isin(clusters, a.target_clusters)
+            mask = np.isin(clusters, a.clusters)
             masked_clusters = clusters[mask]
             masked_features = f[f'{a.model}/features'][mask]
 
@@ -361,7 +346,7 @@ class CLI(BaseMLCLI):
         data = []
         labels = []
 
-        for target in a.target_clusters:
+        for target in a.clusters:
             cluster_values = values[masked_clusters == target].flatten()
             data.append(cluster_values)
             labels.append(f'Cluster {target}')
@@ -392,8 +377,11 @@ class CLI(BaseMLCLI):
             ax.set_title('Distribution of PCA Values by Cluster')
             ax.grid(axis='y', linestyle='--', alpha=0.7)
             plt.tight_layout()
-            if a.fig:
-                plt.savefig(a.fig)
+            if not a.nosave:
+                p = P(a.input_path)
+                fig_path = str(p.parent / f'{p.stem}_score_{a.name}.png')
+                plt.savefig(fig_path)
+                print(f'wrote {fig_path}')
             plt.show()
 
 
@@ -408,35 +396,34 @@ class CLI(BaseMLCLI):
         overwrite: bool = Field(False, s='-O')
 
     def run_cluster_latent(self, a):
+        target_path = f'{a.model}/latent_clusters'
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
             features = f[f'{a.model}/latent_features'][:]
-
-        # if len(a.input_path) > 1:
-        #     # multiple
-        #     dir = os.path.dirname(a.input_paths[0])
-        #     fig_path = f'{dir}/{a.name}.png'
-        # else:
-        #     base, ext = os.path.splitext(a.input_paths[0])
-        #     fig_path = f'{base}_umap.png'
-
+            if target_path in f:
+                if a.overwrite:
+                    print(f'overwriting old {target_path}..')
+                else:
+                    raise RuntimeError(f'{target_path} already exists in {a.input_path}')
 
         s = features.shape
+        print(s)
         h = features.reshape(s[0]*s[1], s[-1]) # B*16*16, 3
-
         print(h.shape)
-        clusters = leiden_cluster(h, None, a.resolution, 'tqdm')
 
+        clusters = leiden_cluster(h,
+                                  umap_emb_func=None,
+                                  resolution=a.resolution,
+                                  n_jobs=-1,
+                                  progress='tqdm')
+
+        clusters = clusters.reshape(s[0], s[1])
         print(clusters.shape)
-        print(clusters[:10])
 
-        # fig = cluster_proc.plot_umap()
-        # if not a.nosave:
-        #     fig.savefig(fig_path)
-        #     print(f'wrote {fig_path}')
-        #
-        # if not a.noshow:
-        #     plt.show()
+        with h5py.File(a.input_path, 'a') as f:
+            if target_path in f:
+                del f[target_path]
+            f.create_dataset(target_path, data=clusters)
 
 
 
