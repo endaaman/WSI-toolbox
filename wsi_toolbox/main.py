@@ -171,7 +171,7 @@ class CLI(BaseMLCLI):
 
         s = ''
         if len(a.sub) > 0:
-            s = '-'.join([str(i) for i in a.sub]) + '_'
+            s = 'sub' + '-'.join([str(i) for i in a.sub]) + '_'
         fig_path = f'{base}_{s}umap.png'
 
         fig = cluster_proc.plot_umap()
@@ -320,7 +320,6 @@ class CLI(BaseMLCLI):
         plt.show()
 
 
-
     class PreviewArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
@@ -334,7 +333,7 @@ class CLI(BaseMLCLI):
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
             if a.cluster_name:
-                output_path = f'{base}_thumb_{a.cluster_name}.jpg'
+                output_path = f'{base}_{a.cluster_name}_thumb.jpg'
             else:
                 output_path = f'{base}_thumb.jpg'
 

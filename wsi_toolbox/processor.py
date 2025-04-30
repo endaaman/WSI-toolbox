@@ -384,6 +384,7 @@ class ClusterProcessor:
         self.sub_clustering = cluster_filter is not None and len(cluster_filter) > 0
         if self.sub_clustering:
             self.cluster_filter = cluster_filter
+            print(cluster_filter)
         else:
             self.cluster_filter = []
 
@@ -405,18 +406,23 @@ class ClusterProcessor:
                     clusters = f[self.clusters_path][:]
                 else:
                     clusters = None
+                print('clusters', clusters)
 
                 if len(self.cluster_filter) > 0:
                     if clusters is None:
                         raise RuntimeError('If doing sub-clustering, pre-clustering must be done.')
                     mask = np.isin(clusters, self.cluster_filter)
+                    print(mask)
                 else:
                     mask = np.repeat(True, patch_count)
                 self.masks.append(mask)
+                print('sum', np.sum(mask))
 
                 features = f[f'{self.model_name}/features'][mask]
+                print('features', features.shape)
 
                 if clusters is not None:
+                    print('masked clusters', clusters[mask])
                     clusterss.append(clusters[mask])
 
                 featuress.append(features)
@@ -476,19 +482,20 @@ class ClusterProcessor:
             suffix = '_sub' + '-'.join([str(i) for i in self.cluster_filter])
             target_path = target_path + suffix
 
-        print(target_path)
+        print('writing into ', target_path)
 
         cursor = 0
         for hdf5_path, mask in zip(self.hdf5_paths, self.masks):
-            length = len(mask)
-            masked_clusters = self.total_clusters[cursor:cursor+length]
-            cursor += length
+            count = np.sum(mask)
+            clusters = self.total_clusters[cursor:cursor+count]
+            cursor += count
             with h5py.File(hdf5_path, 'a') as f:
                 if target_path in f:
                     del f[target_path]
-                clusters = np.full(len(mask), -1, dtype=masked_clusters.dtype)
-                clusters[mask] = masked_clusters
-                f.create_dataset(target_path, data=clusters)
+                full_clusters = np.full(len(mask), -1, dtype=clusters.dtype)
+                full_clusters[mask] = clusters
+                print(full_clusters)
+                f.create_dataset(target_path, data=full_clusters)
 
     def plot_umap(self, fig_path=None):
         if not np.any(self.total_clusters):
@@ -558,7 +565,7 @@ class PreviewClustersProcessor(BasePreviewProcessor):
 
     def render_patch(self, f, i, patch):
         cluster = self.clusters[i]
-        if cluster > 0:
+        if cluster >= 0:
             frame = self.frames[cluster]
             patch.paste(frame, (0, 0), frame)
         return patch
