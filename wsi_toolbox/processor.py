@@ -384,7 +384,6 @@ class ClusterProcessor:
         self.sub_clustering = cluster_filter is not None and len(cluster_filter) > 0
         if self.sub_clustering:
             self.cluster_filter = cluster_filter
-            print(cluster_filter)
         else:
             self.cluster_filter = []
 
@@ -406,23 +405,18 @@ class ClusterProcessor:
                     clusters = f[self.clusters_path][:]
                 else:
                     clusters = None
-                print('clusters', clusters)
 
                 if len(self.cluster_filter) > 0:
                     if clusters is None:
                         raise RuntimeError('If doing sub-clustering, pre-clustering must be done.')
                     mask = np.isin(clusters, self.cluster_filter)
-                    print(mask)
                 else:
                     mask = np.repeat(True, patch_count)
                 self.masks.append(mask)
-                print('sum', np.sum(mask))
 
                 features = f[f'{self.model_name}/features'][mask]
-                print('features', features.shape)
 
                 if clusters is not None:
-                    print('masked clusters', clusters[mask])
                     clusterss.append(clusters[mask])
 
                 featuress.append(features)
@@ -494,7 +488,6 @@ class ClusterProcessor:
                     del f[target_path]
                 full_clusters = np.full(len(mask), -1, dtype=clusters.dtype)
                 full_clusters[mask] = clusters
-                print(full_clusters)
                 f.create_dataset(target_path, data=full_clusters)
 
     def plot_umap(self, fig_path=None):

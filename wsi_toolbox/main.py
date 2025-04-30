@@ -171,7 +171,7 @@ class CLI(BaseMLCLI):
 
         s = ''
         if len(a.sub) > 0:
-            s = 'sub' + '-'.join([str(i) for i in a.sub]) + '_'
+            s = 'sub-' + '-'.join([str(i) for i in a.sub]) + '_'
         fig_path = f'{base}_{s}umap.png'
 
         fig = cluster_proc.plot_umap()
@@ -249,7 +249,7 @@ class CLI(BaseMLCLI):
             plt.tight_layout()
             if not a.nosave:
                 p = P(a.input_path)
-                fig_path = str(p.parent / f'{p.stem}_score_{a.name}.png')
+                fig_path = str(p.parent / f'{p.stem}_score-{a.name}_pca.png')
                 plt.savefig(fig_path)
                 print(f'wrote {fig_path}')
             plt.show()
@@ -363,7 +363,7 @@ class CLI(BaseMLCLI):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_thumb_score_{a.score_name}.jpg'
+            output_path = f'{base}_score-{a.score_name}_thumb.jpg'
 
         proc = PreviewScoresProcessor(
                 a.input_path,
