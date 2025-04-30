@@ -29,7 +29,8 @@ from torch.amp import autocast
 import timm
 from gigapath import slide_encoder
 
-from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor, PreviewScoresProcessor
+from .processor import WSIProcessor, TileProcessor, ClusterProcessor, \
+        PreviewClustersProcessor, PreviewScoresProcessor, PreviewLatentPCAProcessor, PreviewLatentClusterProcessor
 from .common import create_model
 from .utils import hover_images_on_scatters, create_frame, get_platform_font
 from .utils.cli import BaseMLCLI, BaseMLArgs
@@ -98,11 +99,11 @@ class CLI(BaseMLCLI):
             else:
                 output_path = f'{base}_thumb.jpg'
 
-        thumb_proc = PreviewClustersProcessor(
+        proc = PreviewClustersProcessor(
                 a.input_path,
                 model_name=a.model,
                 size=a.size)
-        img = thumb_proc.create_thumbnail(
+        img = proc.create_thumbnail(
                 cluster_name=a.cluster_name,
                 progress='tqdm')
         img.save(output_path)
@@ -126,12 +127,39 @@ class CLI(BaseMLCLI):
             base, ext = os.path.splitext(a.input_path)
             output_path = f'{base}_thumb_score_{a.score_name}.jpg'
 
-        thumb_proc = PreviewScoresProcessor(
+        proc = PreviewScoresProcessor(
                 a.input_path,
                 model_name=a.model,
                 size=a.size)
-        img = thumb_proc.create_thumbnail(
+        img = proc.create_thumbnail(
                 score_name=a.score_name,
+                progress='tqdm')
+        img.save(output_path)
+        print(f'wrote {output_path}')
+
+        if a.open:
+            os.system(f'xdg-open {output_path}')
+
+
+    class PreviewLatentPcaArgs(CommonArgs):
+        input_path: str = Field(..., l='--in', s='-i')
+        output_path: str = Field('', l='--out', s='-o')
+        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
+        alpha: float = 0.5
+        size: int = 64
+        open: bool = False
+
+    def run_preview_latent_pca(self, a:PreviewArgs):
+        output_path = a.output_path
+        if not output_path:
+            base, ext = os.path.splitext(a.input_path)
+            output_path = f'{base}_latent_pca.jpg'
+
+        proc = PreviewLatentPCAProcessor(
+                a.input_path,
+                model_name=a.model,
+                size=a.size)
+        img = proc.create_thumbnail(
                 progress='tqdm')
         img.save(output_path)
         print(f'wrote {output_path}')
@@ -145,78 +173,27 @@ class CLI(BaseMLCLI):
         output_path: str = Field('', l='--out', s='-o')
         model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
         alpha: float = 0.5
-        scale: int = 4
+        size: int = 64
         open: bool = False
 
     def run_preview_latent(self, a:PreviewArgs):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
-            output_path = f'{base}_latent_pca.jpg'
+            output_path = f'{base}_latent_clusters.jpg'
 
-        font = ImageFont.truetype(font=get_platform_font(), size=12)
-
-        pca = PCA(n_components=3)
-        with h5py.File(a.input_path, 'r') as f:
-            cols = f['metadata/cols'][()]
-            rows = f['metadata/rows'][()]
-            patch_count = f['metadata/patch_count'][()]
-            patch_size = f['metadata/patch_size'][()]
-            coordinates = f['coordinates'][()]
-            print('Loading latent features')
-            h = f[f'{a.model}/latent_features'][()] # B, 256, EMB
-
-        print('Loaded latent features')
-
-        h = h.astype(np.float32)
-        s = h.shape
-        print('start PCA')
-        latent_pca = pca.fit_transform(h.reshape(s[0]*s[1], s[-1])) # B*256, 3
-        # latent_pca = latent_pca.reshape(s[0], s[1], 3) # B, 256, 3
-        print('done PCA')
-
-        print(latent_pca.shape)
-
-        scaler = MinMaxScaler()
-        latent_pca = scaler.fit_transform(latent_pca)
-
-        latent_size = int(np.sqrt(s[1]))
-        assert latent_size**2 == s[1]
-        # latent_pca = latent_pca.reshape(s[0], s[1], 3)
-        latent_pca = latent_pca.reshape(s[0], latent_size, latent_size, 3)
-        pca_overlays = (latent_pca*255).astype(np.uint8)
-
-        S = latent_size*a.scale
-        canvas = Image.new('RGB', (cols*S, rows*S), (0,0,0))
-
-        alpha_mask = Image.new('L', (S, S), int(a.alpha*255))
-        for i in tqdm(range(patch_count)):
-            coord = coordinates[i]
-            x, y = coord//patch_size*S
-            patch = f['patches'][i]
-            patch = Image.fromarray(patch)
-            patch = patch.resize((S, S))
-            overlay = pca_overlays[i]
-            # A = overlay[:, 0, :]
-            # B = overlay[:, -1, :]
-            # overlay[:, 0, :] = B
-            # overlay[:, -1, :] = A
-            # if True:
-            #     alpha_mask = np.array(alpha_mask)
-            #     print(alpha_mask.shape)
-            #     print((overlay[:, :, 0] < 0.8).shape)
-            #     alpha_mask[overlay[:, :, 0] < 0.4] = 0
-            #     alpha_mask = Image.fromarray(alpha_mask)
-            overlay = Image.fromarray(overlay).convert('RGBA')
-            overlay = overlay.resize((S, S), Image.NEAREST)
-            patch.paste(overlay, (0, 0), alpha_mask)
-            canvas.paste(patch, (x, y, x+S, y+S))
-
-            canvas.save(output_path)
-            print(f'wrote {output_path}')
+        proc = PreviewLatentClusterProcessor(
+                a.input_path,
+                model_name=a.model,
+                size=a.size)
+        img = proc.create_thumbnail(
+                progress='tqdm')
+        img.save(output_path)
+        print(f'wrote {output_path}')
 
         if a.open:
             os.system(f'xdg-open {output_path}')
+
 
 
     class ProcessPatchesArgs(CommonArgs):

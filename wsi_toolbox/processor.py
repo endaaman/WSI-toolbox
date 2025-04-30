@@ -12,7 +12,7 @@ import tifffile
 import zarr
 import torch
 import timm
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 import umap
@@ -571,4 +571,67 @@ class PreviewScoresProcessor(BasePreviewProcessor):
             color = mcolors.rgb2hex(self.cmap(score)[:3])
             frame = create_frame(self.size, color, f'{score:.3f}', self.font)
             patch.paste(frame, (0, 0), frame)
+        return patch
+
+
+
+class PreviewLatentPCAProcessor(BasePreviewProcessor):
+    def load(self, f, **kwargs):
+        alpha = kwargs.pop('alpha', 0.5)
+        h = f[f'{self.model_name}/latent_features'][()] # B, L(16x16), EMB(1024)
+        h = h.astype(np.float32)
+        s = h.shape
+
+        # Estimate original latent size
+        latent_size = int(np.sqrt(s[1])) # l = sqrt(L)
+        # Validate dyadicity
+        assert latent_size**2 == s[1]
+        if self.size % latent_size != 0:
+            print(f'WARNING: {self.size} is not divident by {latent_size}')
+
+        pca = PCA(n_components=3)
+        latent_pca = pca.fit_transform(h.reshape(s[0]*s[1], s[-1])) # B*L, 3
+
+        scaler = MinMaxScaler()
+        latent_pca = scaler.fit_transform(latent_pca)
+
+        latent_pca = latent_pca.reshape(s[0], latent_size, latent_size, 3)
+        self.overlays = (latent_pca*255).astype(np.uint8) # B, l, l, 3
+
+        self.alpha_mask = Image.new('L', (self.size, self.size), int(alpha*255))
+
+
+    def render_patch(self, f, i, patch):
+        overlay = Image.fromarray(self.overlays[i]).convert('RGBA')
+        overlay = overlay.resize((self.size, self.size), Image.NEAREST)
+        patch.paste(overlay, (0, 0), self.alpha_mask)
+        return patch
+
+
+
+class PreviewLatentClusterProcessor(BasePreviewProcessor):
+    def load(self, f, **kwargs):
+        alpha = kwargs.pop('alpha', 0.5)
+        clusters = f[f'{self.model_name}/latent_clusters'][()] # B, L(16x16)
+        s = clusters.shape
+
+        # Estimate original latent size
+        latent_size = int(np.sqrt(s[1])) # l = sqrt(L)
+        # Validate dyadicity
+        assert latent_size**2 == s[1]
+        if self.size % latent_size != 0:
+            print(f'WARNING: {self.size} is not divident by {latent_size}')
+
+        cmap = plt.get_cmap('tab20')
+        latent_map = cmap(clusters)
+        latent_map = latent_map.reshape(s[0], latent_size, latent_size, 4)
+        self.overlays = (latent_map*255).astype(np.uint8) # B, l, l, 4
+
+        self.alpha_mask = Image.new('L', (self.size, self.size), int(alpha*255))
+
+
+    def render_patch(self, f, i, patch):
+        overlay = Image.fromarray(self.overlays[i]).convert('RGBA')
+        overlay = overlay.resize((self.size, self.size), Image.NEAREST)
+        patch.paste(overlay, (0, 0), self.alpha_mask)
         return patch
