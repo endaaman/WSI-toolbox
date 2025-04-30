@@ -371,7 +371,7 @@ class TileProcessor:
 
 
 class ClusterProcessor:
-    def __init__(self, hdf5_paths, model_name=DEFAULT_MODEL, cluster_name=''):
+    def __init__(self, hdf5_paths, model_name=DEFAULT_MODEL, cluster_name='', cluster_filter=None):
         assert model_name in ['uni', 'gigapath', 'virchow2']
         self.multi = len(hdf5_paths) > 1
         if self.multi:
@@ -381,30 +381,60 @@ class ClusterProcessor:
         self.hdf5_paths = hdf5_paths
         self.model_name = model_name
         self.cluster_name = cluster_name
+        self.sub_clustering = cluster_filter is not None and len(cluster_filter) > 0
+        if self.sub_clustering:
+            self.cluster_filter = cluster_filter
+        else:
+            self.cluster_filter = []
 
         if self.multi:
             self.clusters_path = f'{self.model_name}/clusters_{self.cluster_name}'
         else:
             self.clusters_path = f'{self.model_name}/clusters'
 
-        features = []
-        lengths = []
-        clusters = []
+        featuress = []
+        clusterss = []
+
+        self.masks = []
         for hdf5_path in self.hdf5_paths:
             with h5py.File(hdf5_path, 'r') as f:
                 patch_count = f['metadata/patch_count'][()]
-                lengths.append(patch_count)
-                features.append(f[f'{self.model_name}/features'][:])
+
+                # Store if clusters were already calcurated
                 if self.clusters_path in f:
-                    clusters.append(f[self.clusters_path][:])
+                    clusters = f[self.clusters_path][:]
+                else:
+                    clusters = None
 
-        self.lengths = lengths
-        features = np.concatenate(features)
+                if len(self.cluster_filter) > 0:
+                    if clusters is None:
+                        raise RuntimeError('If doing sub-clustering, pre-clustering must be done.')
+                    mask = np.isin(clusters, self.cluster_filter)
+                else:
+                    mask = np.repeat(True, patch_count)
+                self.masks.append(mask)
+
+                features = f[f'{self.model_name}/features'][mask]
+
+                if clusters is not None:
+                    clusterss.append(clusters[mask])
+
+                featuress.append(features)
+
+        features = np.concatenate(featuress)
+
         scaler = StandardScaler()
-        self.scaled_features = scaler.fit_transform(features)
+        self.features = scaler.fit_transform(features)
 
-        self.clusters = np.concatenate(clusters) if len(clusters)>0 else None
-
+        if len(clusterss) == len(self.hdf5_paths):
+            self.has_clusters = True
+            self.total_clusters = np.concatenate(clusterss)
+        elif len(clusterss) == 0:
+            self.has_clusters = False
+            self.total_clusters = None
+        else:
+            raise RuntimeError(f'Count of pre-clustered doesn\'t equal to count of HDF5 files.\n'+
+                               f'Pre-cluster count:{len(total_clusterss)} vs HDF5 count:{len(self.hdf5_paths)}')
         self._umap_embeddings = None
 
     def get_umap_embeddings(self):
@@ -417,44 +447,55 @@ class ClusterProcessor:
                 n_components=2,
                 # random_state=a.seed
             )
-        embs = reducer.fit_transform(self.scaled_features)
+        embs = reducer.fit_transform(self.features)
         self._umap_embeddings = embs
         return embs
 
 
-    def anlyze_clusters(self, resolution=1.0, use_umap_embs=False, overwrite=False, progress=DEFAULT_BACKEND):
-        if np.any(self.clusters) and not overwrite:
+    def anlyze_clusters(self,
+                        resolution=1.0,
+                        use_umap_embs=False,
+                        overwrite=False,
+                        progress=DEFAULT_BACKEND
+                        ):
+        if not self.sub_clustering and self.has_clusters and not overwrite:
             print('Skip clustering')
             return
 
-        clusters = leiden_cluster(self.scaled_features,
-                                  umap_emb_func=self.get_umap_embeddings,
-                                  resolution=resolution,
-                                  progress=progress)
 
-        n_clusters = len(set(clusters)) - (1 if -1 in clusters else 0)
-        n_noise = list(clusters).count(-1)
-        # print('n_clusters', n_clusters)
-        # print('n_noise', n_noise)
+        self.total_clusters = leiden_cluster(self.features,
+                                             umap_emb_func=self.get_umap_embeddings if use_umap_embs else None,
+                                             resolution=resolution,
+                                             progress=progress)
+
+        # n_clusters = len(set(total_clusters)) - (1 if -1 in total_clusters else 0)
+        # n_noise = list(total_clusters).count(-1)
+
+        target_path = self.clusters_path
+        if self.sub_clustering:
+            suffix = '_sub' + '-'.join([str(i) for i in self.cluster_filter])
+            target_path = target_path + suffix
+
+        print(target_path)
 
         cursor = 0
-        for hdf5_path, length in zip(self.hdf5_paths, self.lengths):
-            cc = clusters[cursor:cursor+length]
+        for hdf5_path, mask in zip(self.hdf5_paths, self.masks):
+            length = len(mask)
+            masked_clusters = self.total_clusters[cursor:cursor+length]
             cursor += length
             with h5py.File(hdf5_path, 'a') as f:
-                if self.clusters_path in f:
-                    del f[self.clusters_path]
-                f.create_dataset(self.clusters_path, data=cc)
-
-        self.clusters = clusters
-
+                if target_path in f:
+                    del f[target_path]
+                clusters = np.full(len(mask), -1, dtype=masked_clusters.dtype)
+                clusters[mask] = masked_clusters
+                f.create_dataset(target_path, data=clusters)
 
     def plot_umap(self, fig_path=None):
-        if not np.any(self.clusters):
+        if not np.any(self.total_clusters):
             raise RuntimeError('Compute clusters before umap projection.')
 
         fig = plot_umap(embeddings=self.get_umap_embeddings(),
-                        clusters=self.clusters)
+                        clusters=self.total_clusters)
 
         if fig_path is not None:
             plt.savefig(fig_path, bbox_inches='tight', pad_inches=0.5)
@@ -501,7 +542,6 @@ class PreviewClustersProcessor(BasePreviewProcessor):
         font_size = kwargs.pop('font_size', 16)
         self.cluster_name = kwargs.pop('cluster_name', '')
 
-        clusters = []
         # if None, clusters would be empty
         cluster_path = f'{self.model_name}/clusters'
         if self.cluster_name:
@@ -512,13 +552,15 @@ class PreviewClustersProcessor(BasePreviewProcessor):
 
         cmap = plt.get_cmap('tab20')
         self.frames = {}
-        for cluster in np.unique(clusters).tolist() + [-1]:
+        for cluster in np.unique(self.clusters).tolist() + [-1]:
             color = mcolors.rgb2hex(cmap(cluster)[:3]) if cluster >= 0 else '#111'
             self.frames[cluster] = create_frame(self.size, color, f'{cluster}', font)
 
     def render_patch(self, f, i, patch):
-        frame = self.frames[self.clusters[i]]
-        patch.paste(frame, (0, 0), frame)
+        cluster = self.clusters[i]
+        if cluster > 0:
+            frame = self.frames[cluster]
+            patch.paste(frame, (0, 0), frame)
         return patch
 
 

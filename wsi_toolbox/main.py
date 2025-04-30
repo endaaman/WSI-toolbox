@@ -31,7 +31,7 @@ from gigapath import slide_encoder
 
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, \
         PreviewClustersProcessor, PreviewScoresProcessor, PreviewLatentPCAProcessor, PreviewLatentClusterProcessor
-from .common import create_model
+from .common import DEFAULT_MODEL, create_model
 from .utils import plot_umap
 from .utils.cli import BaseMLCLI, BaseMLArgs
 from .utils.analysis import leiden_cluster
@@ -86,7 +86,7 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         batch_size: int = Field(512, s='-B')
         overwrite: bool = Field(False, s='-O')
-        model_name: str = Field('gigapath', choice=['gigapath', 'uni'], l='--model', s='-M')
+        model_name: str = Field(DEFAULT_MODEL, choice=['gigapath', 'uni'], l='--model', s='-M')
         with_latent_features: bool = Field(False, s='-L')
 
     def run_process_patches(self, a):
@@ -140,8 +140,9 @@ class CLI(BaseMLCLI):
 
     class ClusterArgs(CommonArgs):
         input_paths: list[str] = Field(..., l='--in', s='-i')
-        name: str = ''
-        model: str = Field('gigapath', choices=['gigapath', 'uni', 'virchow2'])
+        cluster_name: str = Field('', l='--name', s='-n')
+        sub: list[int] = Field([], l='--sub', s='-s')
+        model: str = Field(DEFAULT_MODEL, choices=['gigapath', 'uni', 'virchow2'])
         resolution: float = 1
         use_umap_embs: float = False
         nosave: bool = False
@@ -152,7 +153,9 @@ class CLI(BaseMLCLI):
         cluster_proc = ClusterProcessor(
                 a.input_paths,
                 model_name=a.model,
-                cluster_name=a.name)
+                cluster_name=a.cluster_name,
+                cluster_filter=a.sub,
+                )
         cluster_proc.anlyze_clusters(
                 resolution=a.resolution,
                 use_umap_embs=a.use_umap_embs,
@@ -162,10 +165,14 @@ class CLI(BaseMLCLI):
         if len(a.input_paths) > 1:
             # multiple
             dir = os.path.dirname(a.input_paths[0])
-            fig_path = f'{dir}/{a.name}.png'
+            base = fig_path = f'{dir}/{a.name}'
         else:
             base, ext = os.path.splitext(a.input_paths[0])
-            fig_path = f'{base}_umap.png'
+
+        s = ''
+        if len(a.sub) > 0:
+            s = '-'.join([str(i) for i in a.sub]) + '_'
+        fig_path = f'{base}_{s}umap.png'
 
         fig = cluster_proc.plot_umap()
         if not a.nosave:
@@ -180,7 +187,7 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         name: str = Field(...)
         clusters: list[int] = Field([], s='-C')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
+        model: str = Field(DEFAULT_MODEL, choice=['gigapath', 'uni', 'none'])
         scaler: str = Field('minmax', choices=['std', 'minmax'])
         noshow: bool = False
         nosave: bool = False
@@ -251,7 +258,7 @@ class CLI(BaseMLCLI):
     class ClusterLatentArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         name: str = ''
-        model: str = Field('gigapath', choices=['gigapath', 'uni', 'virchow2'])
+        model: str = Field(DEFAULT_MODEL, choices=['gigapath', 'uni', 'virchow2'])
         resolution: float = 1
         use_umap_embs: float = False
         nosave: bool = False
@@ -317,7 +324,7 @@ class CLI(BaseMLCLI):
     class PreviewArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'virchow2'])
+        model: str = Field(DEFAULT_MODEL, choice=['gigapath', 'uni', 'virchow2'])
         cluster_name: str = Field('', l='--name', s='-N')
         size: int = 64
         open: bool = False
@@ -348,7 +355,7 @@ class CLI(BaseMLCLI):
     class PreviewScoresArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'unified', 'none'])
+        model: str = Field(DEFAULT_MODEL, choice=['gigapath', 'uni', 'unified', 'none'])
         score_name: str = Field(..., l='--name', s='-N')
         size: int = 64
         open: bool = False
@@ -376,7 +383,7 @@ class CLI(BaseMLCLI):
     class PreviewLatentPcaArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
+        model: str = Field(DEFAULT_MODEL, choice=['gigapath', 'uni', 'none'])
         alpha: float = 0.5
         size: int = 64
         open: bool = False
@@ -403,7 +410,7 @@ class CLI(BaseMLCLI):
     class PreviewLatentArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')
         output_path: str = Field('', l='--out', s='-o')
-        model: str = Field('gigapath', choice=['gigapath', 'uni', 'none'])
+        model: str = Field(DEFAULT_MODEL, choice=['gigapath', 'uni', 'none'])
         alpha: float = 0.5
         size: int = 64
         open: bool = False
