@@ -366,8 +366,8 @@ def main():
                         st.write(f'クラスタリング結果を{os.path.basename(umap_path)}に出力しました。')
 
                         with st.spinner('オーバービュー生成中', show_time=True):
-                            thumb_proc = PreviewClustersProcessor(hdf5_path, cluster_name='', size=64)
-                            img = thumb_proc.create_thumbnail(progress='streamlit')
+                            thumb_proc = PreviewClustersProcessor(hdf5_path, size=64)
+                            img = thumb_proc.create_thumbnail(cluster_name='', progress='streamlit')
                             img.save(thumb_path)
                         st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
                     if i < len(selected_files)-1:
@@ -435,7 +435,8 @@ def main():
                     cluster_proc = ClusterProcessor(
                             [f['path'] for f in selected_files],
                             model_name=DEFAULT_MODEL,
-                            cluster_name=cluster_name)
+                            cluster_name=cluster_name,
+                            )
                     t = 'と'.join([f['name'] for f in selected_files])
                     with st.spinner(f'{t}をクラスタリング中...', show_time=True):
                         p = P(selected_files[0]['path'])
@@ -444,8 +445,10 @@ def main():
                         else:
                             umap_path = str(p.parent / f'{p.stem}_umap.png')
 
-                        cluster_proc.anlyze_clusters(resolution=resolution, overwrite=overwrite,
-                                                     use_umap_embs=use_umap_embs, progress='streamlit')
+                        cluster_proc.anlyze_clusters(resolution=resolution,
+                                                     overwrite=overwrite,
+                                                     use_umap_embs=use_umap_embs,
+                                                     progress='streamlit')
                         cluster_proc.plot_umap(fig_path=umap_path)
 
                     st.subheader('UMAP投射 + クラスタリング')
@@ -457,13 +460,13 @@ def main():
 
                     with st.spinner('オーバービュー生成中...', show_time=True):
                         for file in selected_files:
-                            thumb_proc = PreviewClustersProcessor(file['path'], cluster_name=cluster_name, size=64)
+                            thumb_proc = PreviewClustersProcessor(file['path'], size=64)
                             p = P(file['path'])
                             if multi:
                                 thumb_path = str(p.parent / f'{cluster_name}_{p.stem}_thumb.jpg')
                             else:
                                 thumb_path = str(p.parent / f'{p.stem}_thumb.jpg')
-                            thumb = thumb_proc.create_thumbnail(progress='streamlit')
+                            thumb = thumb_proc.create_thumbnail(cluster_name=cluster_name, progress='streamlit')
                             thumb.save(thumb_path)
                             st.subheader('オーバービュー')
                             thumb_filename = os.path.basename(thumb_path)
