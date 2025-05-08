@@ -29,6 +29,7 @@ dependencies = [
     "pandas>=2.2.3",
     "pillow>=11.0.0",
     "pydantic>=2.10.6",
+    "pydantic-autocli>=0.1.4",
     "pyqt6>=6.8.1",
     "python-igraph>=0.11.8",
     "scikit-learn>=1.6.1",

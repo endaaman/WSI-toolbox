@@ -6,6 +6,7 @@ from pathlib import Path as P
 
 from tqdm import tqdm
 from pydantic import Field
+from pydantic_autocli import param
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 import numpy as np
@@ -53,14 +54,14 @@ class CLI(BaseMLCLI):
         pass
 
     class Wsi2h5Args(CommonArgs):
-        input_path: str = Field(..., l='--in', s='-i')
-        output_path: str = Field('', l='--out', s='-o')
-        patch_size: int = Field(256, s='-S')
-        overwrite: bool = Field(False, s='-O')
-        engine: str = Field('auto', choices=['auto', 'openslide', 'tifffile'])
+        input_path: str = param(..., l='--in', s='-i')
+        output_path: str = param('', l='--out', s='-o')
+        patch_size: int = param(256, s='-S')
+        overwrite: bool = param(False, s='-O')
+        engine: str = param('auto', choices=['auto', 'openslide', 'tifffile'])
         mpp: float = 0
 
-    def run_wsi2h5(self, a):
+    def run_wsi2h5(self, a:Wsi2h5Args):
         output_path = a.output_path
         if not output_path:
             base, ext = os.path.splitext(a.input_path)
@@ -102,7 +103,7 @@ class CLI(BaseMLCLI):
         input_path: str = Field(..., l='--in', s='-i')
         overwrite: bool = Field(False, s='-O')
 
-    def run_process_slide(self, a):
+    def run_process_slide(self, a:ProcessSlideArgs):
         with h5py.File(a.input_path, 'r') as f:
             if 'slide_feature' in f:
                 if not a.overwrite:
@@ -149,7 +150,7 @@ class CLI(BaseMLCLI):
         noshow: bool = False
         overwrite: bool = Field(False, s='-O')
 
-    def run_cluster(self, a):
+    def run_cluster(self, a:ClusterArgs):
         cluster_proc = ClusterProcessor(
                 a.input_paths,
                 model_name=a.model,
@@ -192,7 +193,7 @@ class CLI(BaseMLCLI):
         noshow: bool = False
         nosave: bool = False
 
-    def run_cluster_scores(self, a):
+    def run_cluster_scores(self, a:ClusterScoresArgs):
         with h5py.File(a.input_path, 'r') as f:
             patch_count = f['metadata/patch_count'][()]
             clusters = f[f'{a.model}/clusters'][:]

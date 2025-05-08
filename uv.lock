@@ -1549,6 +1549,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pydantic-autocli"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/cd/c18e4ae554e6d8c2848a60169ff806a318c509e1362b3aad1003c0b84399/pydantic_autocli-0.1.4.tar.gz", hash = "sha256:694de3f1dfbec78280c3fa48b3ea20783a40a553a49e0733e656d36b9dddbe94", size = 55672, upload_time = "2025-05-07T15:19:29.05Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e9/af/6d8b5b809174926fec41c0b56a3783a7acd5709323f179d47ecef39006c6/pydantic_autocli-0.1.4-py3-none-any.whl", hash = "sha256:829364a6ee16cd14b3fc6e8ee058abc66448c572bfa658d4a07a3c8f29648a51", size = 11327, upload_time = "2025-05-07T15:19:27.307Z" },
+]
+
+[[package]]
 name = "pydantic-core"
 version = "2.33.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2444,6 +2456,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pillow" },
     { name = "pydantic" },
+    { name = "pydantic-autocli" },
     { name = "pyqt6" },
     { name = "python-igraph" },
     { name = "scikit-learn" },
@@ -2497,6 +2510,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "pydantic", specifier = ">=2.10.6" },
+    { name = "pydantic-autocli", specifier = ">=0.1.4" },
     { name = "pyqt6", specifier = ">=6.8.1" },
     { name = "python-igraph", specifier = ">=0.11.8" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
