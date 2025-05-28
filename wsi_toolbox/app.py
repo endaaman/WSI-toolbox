@@ -3,7 +3,6 @@ import time
 import os
 from pathlib import Path as P
 import sys
-import warnings
 
 import numpy as np
 from PIL import Image
@@ -24,8 +23,6 @@ from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClu
 
 
 Image.MAX_IMAGE_PIXELS = 3_500_000_000
-warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
-warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
 def add_beforeunload_js():
     js = """

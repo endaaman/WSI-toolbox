@@ -1,6 +1,7 @@
 import os
 import gc
 import sys
+import warnings
 
 from PIL import Image, ImageFont, ImageDraw
 import cv2
@@ -24,6 +25,11 @@ from .common import create_model, DEFAULT_MODEL, DEFAULT_BACKEND
 from .utils import create_frame, get_platform_font, plot_umap
 from .utils.progress import tqdm_or_st
 from .utils.analysis import leiden_cluster
+
+
+
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
+warnings.filterwarnings('ignore', category=FutureWarning, message="You are using `torch.load` with `weights_only=False`")
 
 
 def is_white_patch(patch, rgb_std_threshold=7.0, white_ratio=0.7):
@@ -114,8 +120,6 @@ class TiffFile(WSIFile):
         height = min(height, full_height - y)
 
         if page.is_tiled:
-            # LLMに聞くと region 引数が現れるがそんなものはない
-            # region = page.asarray(region=(y, x, height, width))
             region = self.zarr_data[y:y+height, x:x+width]
         else:
             full_image = page.asarray()

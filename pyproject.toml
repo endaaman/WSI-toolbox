@@ -32,6 +32,7 @@ dependencies = [
     "pydantic-autocli>=0.1.4",
     "pyqt6>=6.8.1",
     "python-igraph>=0.11.8",
+    "rich>=14.0.0",
     "scikit-learn>=1.6.1",
     "seaborn>=0.13.2",
     "streamlit>=1.43.2",
@@ -67,8 +68,9 @@ requires-dist = ["torch", "einops"]
 
 
 [tool.taskipy.tasks]
-main = "python -m wsi_toolbox.main"
-server = "streamlit run wsi_toolbox/server.py --server.address 0.0.0.0 --server.port ${PORT:-8501}"
+cli = "python -m wsi_toolbox.cli"
+app = "streamlit run wsi_toolbox/app.py --server.address 0.0.0.0 --server.port ${PORT:-8501}"
+watcher = "python -m wsi_toolbox.watcher"
 
 [tool.hatch.build.targets.wheel]
 packages = ["wsi_toolbox"]
