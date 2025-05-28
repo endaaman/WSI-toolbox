@@ -32,13 +32,13 @@ class Task:
     
     def write_banner(self):
         """処理開始時のバナーをログに書き込み"""
-        self.append_log("\n" + "="*50 + "\n")
-        self.append_log(f"Processing folder: {self.folder}\n")
-        self.append_log(f"Found {len(self.wsi_files)} WSI files:\n")
+        self.append_log("="*50)
+        self.append_log(f"Processing folder: {self.folder}")
+        self.append_log(f"Found {len(self.wsi_files)} WSI files:")
         for i, wsi_file in enumerate(self.wsi_files, 1):
             size_mb = wsi_file.stat().st_size / (1024 * 1024)
-            self.append_log(f"  {i}. {wsi_file.name} ({size_mb:.1f} MB)\n")
-        self.append_log("="*50 + "\n")
+            self.append_log(f"  {i}. {wsi_file.name} ({size_mb:.1f} MB)")
+        self.append_log("="*50)
     
     def run(self):
         try:
@@ -52,65 +52,64 @@ class Task:
             # WSIファイルごとの処理
             for wsi_file in self.wsi_files:
                 try:
-                    self.append_log(f"Processing: {wsi_file.name}\n")
+                    self.append_log(f"Processing: {wsi_file.name}")
                     
                     # HDF5変換（既存の場合はスキップ）
                     h5_file = wsi_file.with_suffix(".h5")
                     if not h5_file.exists():
-                        self.append_log("Converting to HDF5...\n")
+                        self.append_log("Converting to HDF5...")
                         wp = WSIProcessor(str(wsi_file))
                         wp.convert_to_hdf5(str(h5_file))
-                        self.append_log("HDF5 conversion completed.\n")
+                        self.append_log("HDF5 conversion completed.")
                     
                     # ViT特徴量抽出（既存の場合はスキップ）
-                    self.append_log("Extracting ViT features...\n")
+                    self.append_log("Extracting ViT features...")
                     tp = TileProcessor(device="cuda")
                     tp.evaluate_hdf5_file(str(h5_file))
-                    self.append_log("ViT feature extraction completed,\n")
+                    self.append_log("ViT feature extraction completed.")
                     
                     # クラスタリングとUMAP生成
-                    self.append_log("Starting clustering ...\n")
+                    self.append_log("Starting clustering ...")
                     cp = ClusterProcessor([h5_file])
                     cp.anlyze_clusters(resolution=1.0)
-                    self.append_log("Clustering completed.\n")
+                    self.append_log("Clustering completed.")
                     
                     base = str(wsi_file.with_suffix(""))
 
                     # UMAPプロット生成
-                    self.append_log("Starting UMAP generation...\n")
+                    self.append_log("Starting UMAP generation...")
                     umap_path = Path(f"{base}_umap.png")
                     if not umap_path.exists():
                         cp.plot_umap(fig_path=umap_path)
-                        self.append_log(f"UMAP plot completed. Saved to {os.path.basename(umap_path)}\n")
+                        self.append_log(f"UMAP plot completed. Saved to {os.path.basename(umap_path)}")
                     else:
-                        self.append_log(f"UMAP plot already exists. Skipped.\n")
+                        self.append_log(f"UMAP plot already exists. Skipped.")
                     
                     # サムネイル生成
-                    self.append_log("Starting thumbnail generation...\n")
+                    self.append_log("Starting thumbnail generation...")
                     thumb_path = Path(f"{base}_thumb.jpg")
                     if not thumb_path.exists():
                         thumb_proc = PreviewClustersProcessor(str(h5_file), size=64)
                         img = thumb_proc.create_thumbnail(cluster_name='')
                         img.save(thumb_path)
-                        self.append_log(f"Thumbnail generation completed. Saved to {thumb_path.name}\n")
+                        self.append_log(f"Thumbnail generation completed. Saved to {thumb_path.name}")
                     else:
-                        self.append_log(f"Thumbnail already exists. Skipped.\n")
+                        self.append_log(f"Thumbnail already exists. Skipped.")
 
-                    self.append_log(f"\n{'='*30}\n")
+                    self.append_log("="*30)
                     
                 except Exception as e:
-                    self.append_log(f"Error processing {wsi_file}: {str(e)}\n")
+                    self.append_log(f"Error processing {wsi_file}: {str(e)}")
                     self.set_status(Status.ERROR)
                     if self.on_complete:
                         self.on_complete(self.folder)
                     return
             
             self.set_status(Status.DONE)
-            self.append_log("\nAll processing completed successfully\n")
+            self.append_log("All processing completed successfully")
             
         except Exception as e:
-            self.append_log(f"Error: {str(e)}\n")
-            self.set_status(Status.ERROR)
+            self.append_log(f"Error: {str(e)}")
         
         if self.on_complete:
             self.on_complete(self.folder)
@@ -122,7 +121,8 @@ class Task:
     
     def append_log(self, message: str):
         with open(self.folder / self.LOG_FILE, "a") as f:
-            f.write(message)
+            f.write(message + "\n")
+            print(message)
 
 class Watcher:
     def __init__(self, base_dir: str):
