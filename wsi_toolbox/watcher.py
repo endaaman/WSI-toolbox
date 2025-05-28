@@ -50,9 +50,9 @@ class Task:
             self.write_banner()
             
             # WSIファイルごとの処理
-            for wsi_file in self.wsi_files:
+            for i, wsi_file in enumerate(self.wsi_files):
                 try:
-                    self.append_log(f"Processing: {wsi_file.name}")
+                    self.append_log(f"Processing [{i+1}/{len(self.wsi_files )}]: {wsi_file.name}")
                     
                     # HDF5変換（既存の場合はスキップ）
                     h5_file = wsi_file.with_suffix(".h5")
