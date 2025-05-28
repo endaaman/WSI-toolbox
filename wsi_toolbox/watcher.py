@@ -52,7 +52,6 @@ class Task:
             # WSIファイルごとの処理
             for wsi_file in self.wsi_files:
                 try:
-                    self.append_log(f"\n{'='*30}\n")
                     self.append_log(f"Processing: {wsi_file.name}\n")
                     
                     # HDF5変換（既存の場合はスキップ）
@@ -61,34 +60,43 @@ class Task:
                         self.append_log("Converting to HDF5...\n")
                         wp = WSIProcessor(str(wsi_file))
                         wp.convert_to_hdf5(str(h5_file))
-                        self.append_log("HDF5 conversion completed\n")
+                        self.append_log("HDF5 conversion completed.\n")
                     
                     # ViT特徴量抽出（既存の場合はスキップ）
                     self.append_log("Extracting ViT features...\n")
                     tp = TileProcessor(device="cuda")
                     tp.evaluate_hdf5_file(str(h5_file))
-                    self.append_log("ViT feature extraction completed\n")
+                    self.append_log("ViT feature extraction completed,\n")
                     
                     # クラスタリングとUMAP生成
-                    self.append_log("Starting clustering and UMAP generation...\n")
+                    self.append_log("Starting clustering ...\n")
                     cp = ClusterProcessor([h5_file])
                     cp.anlyze_clusters(resolution=1.0)
-                    cp.get_umap_embeddings()  # UMAP生成
+                    self.append_log("Clustering completed.\n")
                     
-                    # UMAPプロット生成
                     base = str(wsi_file.with_suffix(""))
-                    umap_path = f"{base}_umap.png"
-                    cp.plot_umap(fig_path=umap_path)
-                    self.append_log(f"UMAP plot saved to {os.path.basename(umap_path)}\n")
+
+                    # UMAPプロット生成
+                    self.append_log("Starting UMAP generation...\n")
+                    umap_path = Path(f"{base}_umap.png")
+                    if not umap_path.exists():
+                        cp.plot_umap(fig_path=umap_path)
+                        self.append_log(f"UMAP plot completed. Saved to {os.path.basename(umap_path)}\n")
+                    else:
+                        self.append_log(f"UMAP plot already exists. Skipped.\n")
                     
                     # サムネイル生成
-                    thumb_path = f"{base}_thumb.jpg"
-                    thumb_proc = PreviewClustersProcessor(str(h5_file), size=64)
-                    img = thumb_proc.create_thumbnail(cluster_name='')
-                    img.save(thumb_path)
-                    self.append_log(f"Thumbnail saved to {os.path.basename(thumb_path)}\n")
-                    
-                    self.append_log("Clustering and visualization completed\n")
+                    self.append_log("Starting thumbnail generation...\n")
+                    thumb_path = Path(f"{base}_thumb.jpg")
+                    if not thumb_path.exists():
+                        thumb_proc = PreviewClustersProcessor(str(h5_file), size=64)
+                        img = thumb_proc.create_thumbnail(cluster_name='')
+                        img.save(thumb_path)
+                        self.append_log(f"Thumbnail generation completed. Saved to {thumb_path.name}\n")
+                    else:
+                        self.append_log(f"Thumbnail already exists. Skipped.\n")
+
+                    self.append_log(f"\n{'='*30}\n")
                     
                 except Exception as e:
                     self.append_log(f"Error processing {wsi_file}: {str(e)}\n")
@@ -134,10 +142,10 @@ class Watcher:
                 
                 # カウントダウン表示
                 for remaining in range(interval, 0, -1):
-                    print(f"\r⠴ Next check in {remaining:2d}s", end="", flush=True)
+                    print(f"\rNext check in {remaining:2d}s", end="", flush=True)
                     time.sleep(1)
                 # カウントダウン終了後、同じ行を再利用
-                print("\r⠴ Next check in  0s", end="", flush=True)
+                print("\rNext check in  0s", end="", flush=True)
                 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Stopping watcher...[/]")
@@ -165,7 +173,10 @@ class Watcher:
             
             if Status.is_processing_state(status):
                 continue
-                
+
+            print()
+            print()
+            print(f"detected: {folder}")
             task = Task(folder, on_complete=lambda f: self.running_tasks.pop(f, None))
             self.running_tasks[folder] = task
             task.run()  # 同期実行に変更
