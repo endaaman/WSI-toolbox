@@ -309,6 +309,7 @@ class TileProcessor:
                     if with_latent_features:
                         if (self.feature_name in f) and (self.latent_feature_name in f):
                             # Both exist
+                            done = True # for finalization
                             print('Already extracted. Skipped.')
                             return
                         if (self.feature_name in f) or (self.latent_feature_name in f):
@@ -316,6 +317,7 @@ class TileProcessor:
                             raise RuntimeError(f'Either {self.feature_name} or {self.latent_feature_name} exists.')
                     else:
                         if self.feature_name in f:
+                            done = True # for finalization
                             print('Already extracted. Skipped.')
                             return
 

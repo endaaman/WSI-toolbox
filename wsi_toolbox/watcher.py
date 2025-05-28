@@ -132,16 +132,12 @@ class Watcher:
             try:
                 self.check_folders()
                 
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    TextColumn("[progress.remaining]{task.remaining}"),
-                    console=self.console,
-                ) as progress:
-                    task = progress.add_task("Next check in", total=interval)
-                    for _ in range(interval):
-                        time.sleep(1)
-                        progress.advance(task)
+                # カウントダウン表示
+                for remaining in range(interval, 0, -1):
+                    print(f"\r⠴ Next check in {remaining:2d}s", end="", flush=True)
+                    time.sleep(1)
+                # カウントダウン終了後、同じ行を再利用
+                print("\r⠴ Next check in  0s", end="", flush=True)
                 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Stopping watcher...[/]")
