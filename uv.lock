@@ -1718,6 +1718,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-decouple"
+version = "3.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/97/373dcd5844ec0ea5893e13c39a2c67e7537987ad8de3842fe078db4582fa/python-decouple-3.8.tar.gz", hash = "sha256:ba6e2657d4f376ecc46f77a3a615e058d93ba5e465c01bbe57289bfb7cce680f", size = 9612, upload-time = "2023-03-01T19:38:38.143Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/d4/9193206c4563ec771faf2ccf54815ca7918529fe81f6adb22ee6d0e06622/python_decouple-3.8-py3-none-any.whl", hash = "sha256:d0d45340815b25f4de59c974b855bb38d03151d81b037d9e3f463b0c9f8cbd66", size = 9947, upload-time = "2023-03-01T19:38:36.015Z" },
+]
+
+[[package]]
 name = "python-igraph"
 version = "0.11.8"
 source = { registry = "https://pypi.org/simple" }
@@ -2073,6 +2082,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3e/c0/7286284567e5045f0c587c426d0c41aee5d10c0a2e360e627a83037e9f0c/streamlit-1.44.1.tar.gz", hash = "sha256:c6914ed6d5b76870b461510476806db370f36425ae0e6654d227c988288198d3", size = 9423685, upload-time = "2025-04-01T20:36:19.91Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/eb/17/fc425e1d4d86e31b2aaf0812a2ef2163763a0670d671720c7c36e8679323/streamlit-1.44.1-py3-none-any.whl", hash = "sha256:9fe355f58b11f4eb71e74f115ce1f38c4c9eaff2733e6bcffb510ac1298a5990", size = 9812242, upload-time = "2025-04-01T20:36:16.785Z" },
+]
+
+[[package]]
+name = "streamlit-aggrid"
+version = "1.1.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pandas" },
+    { name = "python-decouple" },
+    { name = "streamlit" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3a/51/cdfbb924b4523958ffc5bbf9c708d68f8194e40d4f4d4734a08532525a65/streamlit_aggrid-1.1.5.tar.gz", hash = "sha256:26671a21b60f284c6205757e87c1b37a41f1f34a916adb6a164d42ad87e30282", size = 4887583, upload-time = "2025-05-27T14:23:28.225Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/b3/6c243722e5746a48b9a114df65e9574eee2907af5885370fe8dbe702295f/streamlit_aggrid-1.1.5-py3-none-any.whl", hash = "sha256:c41e8f4590ed577f96f3f55355f97bb4888c47322bb476cba5fff20bbc46b577", size = 4940784, upload-time = "2025-05-27T14:22:54.417Z" },
 ]
 
 [[package]]
@@ -2497,6 +2520,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "seaborn" },
     { name = "streamlit" },
+    { name = "streamlit-aggrid" },
     { name = "streamlit-antd-components" },
     { name = "taskipy" },
     { name = "tifffile" },
@@ -2553,6 +2577,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "setuptools", marker = "extra == 'build'" },
     { name = "streamlit", specifier = ">=1.43.2" },
+    { name = "streamlit-aggrid", specifier = ">=0.3.4.post3" },
     { name = "streamlit-antd-components", specifier = ">=0.3.2" },
     { name = "taskipy", specifier = ">=1.14.1" },
     { name = "tifffile", specifier = ">=2025.2.18" },

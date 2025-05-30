@@ -10,6 +10,7 @@ from PIL import Image
 import h5py
 import torch
 import pandas as pd
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 torch.classes.__path__ = []
 import streamlit as st
@@ -151,15 +152,15 @@ def list_files(directory):
                 icon = '🖼️'
                 file_type = "Image"
 
-            size = os.path.getsize(item_path)
-            if size > 1024*1024*1024:
-                size_str = f'{size/1024/1024/1024:.1f} GB'
-            elif size > 1024*1024:
-                size_str = f'{size/1024/1024:.1f} MB'
-            elif size > 1024:
-                size_str = f'{size/1024:.1f} KB'
+            size_bytes = os.path.getsize(item_path)
+            if size_bytes > 1024*1024*1024:
+                size_str = f'{size_bytes/1024/1024/1024:.1f} GB'
+            elif size_bytes > 1024*1024:
+                size_str = f'{size_bytes/1024/1024:.1f} MB'
+            elif size_bytes > 1024:
+                size_str = f'{size_bytes/1024:.1f} KB'
             else:
-                size_str = f'{size} bytes'
+                size_str = f'{size_bytes} bytes'
 
             files.append({
                 'selected': False,
@@ -167,6 +168,7 @@ def list_files(directory):
                 'path': item_path,
                 'type': file_type,
                 'size': size_str,
+                'size_bytes': size_bytes,
                 'modified': pd.to_datetime(os.path.getmtime(item_path), unit='s'),
                 'detail': detail,
             })
@@ -178,6 +180,7 @@ def list_files(directory):
                 'path': item_path,
                 'type': 'Directory',
                 'size': '',
+                'size_bytes': 0,
                 'modified': pd.to_datetime(os.path.getmtime(item_path), unit='s'),
                 'detail': None,
             })
@@ -210,6 +213,18 @@ def format_size(size_bytes):
     else:
         return f'{size_bytes/(1024*1024*1024):.1f} GB'
 
+def get_size_bytes(size_str):
+    if not size_str:
+        return 0
+    if 'GB' in size_str:
+        return float(size_str.replace(' GB', '')) * 1024 * 1024 * 1024
+    elif 'MB' in size_str:
+        return float(size_str.replace(' MB', '')) * 1024 * 1024
+    elif 'KB' in size_str:
+        return float(size_str.replace(' KB', '')) * 1024
+    elif 'bytes' in size_str:
+        return float(size_str.replace(' bytes', ''))
+    return 0
 
 BASE_DIR = os.getenv('BASE_DIR', 'data')
 
@@ -417,35 +432,103 @@ def render_navigation(current_dir_abs, default_root_abs):
             st.rerun()
 
 def render_file_list(files):
-    """Render the file list with selection checkboxes."""
-    df = pd.DataFrame(files)
-    if len(df) == 0:
+    """ファイル一覧をAG Gridで表示し、選択されたファイルを返します"""
+    if not files:
         st.warning('ファイルが選択されていません')
         return None, None
 
-    edited_df = st.data_editor(
-        df,
-        column_config={
-            'selected': st.column_config.CheckboxColumn(
-                '選択',
-                help='アイテムを選択',
-            ),
-            'name': 'ファイル名',
-            'type': '種別',
-            'size': 'ファイルサイズ',
-            'modified': st.column_config.DateColumn(
-                '最終変更',
-                format='YYYY/MM/DD hh:mm:ss',
-            ),
-            'path': None,
-            'detail': None,
-        },
-        hide_index=True,
-        use_container_width=True,
-        disabled=st.session_state.locked,
+    df = pd.DataFrame(files)
+    
+    # グリッドの設定
+    gb = GridOptionsBuilder.from_dataframe(df)
+    
+    # カラム設定
+    gb.configure_column(
+        'selected',
+        header_name='選択',
+        type=['checkboxColumn'],
+        width=70,
+        pinned='left'
     )
-    selected_indices = edited_df[edited_df['selected'] == True].index.tolist()
-    selected_files = [files[i] for i in selected_indices]
+    
+    gb.configure_column(
+        'name',
+        header_name='ファイル名',
+        width=300,
+        pinned='left'
+    )
+    
+    gb.configure_column(
+        'type',
+        header_name='種別',
+        width=100,
+        filter='agSetColumnFilter'
+    )
+    
+    gb.configure_column(
+        'size',
+        header_name='ファイルサイズ',
+        width=120,
+        type=['customNumericFormat'],
+        custom_cell_renderer=JsCode("""
+        function(params) {
+            return params.value;
+        }
+        """)
+    )
+    
+    gb.configure_column(
+        'size_bytes',
+        header_name='サイズ（バイト）',
+        width=120,
+        type=['numericColumn', 'numberColumnFilter'],
+        sortable=True,
+        sort='desc',
+        hide=True
+    )
+    
+    gb.configure_column(
+        'modified',
+        header_name='最終変更',
+        width=180,
+        type=['dateColumnFilter', 'customDateTimeFormat'],
+        custom_format_string='yyyy/MM/dd HH:mm:ss'
+    )
+    
+    # 内部カラムを非表示
+    gb.configure_column('path', hide=True)
+    gb.configure_column('detail', hide=True)
+    
+    # グリッドオプション設定
+    grid_options = gb.build()
+    grid_options.update({
+        'rowSelection': 'multiple',
+        'suppressRowClickSelection': True,
+        'pagination': True,
+        'paginationPageSize': 100,
+        'domLayout': 'autoHeight'
+    })
+    
+    # AG Gridの表示
+    grid_response = AgGrid(
+        df,
+        gridOptions=grid_options,
+        height=400,
+        fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True,
+        theme='streamlit',
+        enable_enterprise_modules=False,
+        update_mode='VALUE_CHANGED',
+        reload_data=True
+    )
+    
+    # 選択されたファイルの取得
+    selected_rows = grid_response.get('selected_rows', [])
+    selected_files = [
+        file for file in files
+        if any(file['path'] == row['path'] for row in selected_rows)
+    ]
+    
     return df, selected_files
 
 def main():

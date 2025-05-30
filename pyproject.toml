@@ -37,6 +37,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "streamlit>=1.43.2",
     "streamlit-antd-components>=0.3.2",
+    "streamlit-aggrid>=0.3.4.post3",
     "taskipy>=1.14.1",
     "tifffile>=2025.2.18",
     "timm==0.9.16",
