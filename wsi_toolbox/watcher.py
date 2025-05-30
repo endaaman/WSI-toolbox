@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Dict, Set, Callable, Optional
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+from .common import DEFAULT_MODEL
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
 
 class Status:
-    REQUEST = "REQUEST"
     PROCESSING = "PROCESSING"
     DONE = "DONE"
     ERROR = "ERROR"
@@ -23,9 +24,9 @@ class Task:
     REQUEST_FILE = "_ROBIEMON.txt"
     LOG_FILE = "_ROBIEMON_LOG.txt"
     
-    def __init__(self, folder: Path, on_complete: Optional[Callable[[Path], None]] = None):
+    def __init__(self, folder:Path, model_name:str, on_complete:Optional[Callable[[Path], None]] = None):
         self.folder = folder
-        self.status = Status.REQUEST
+        self.model_name = model_name
         self.on_complete = on_complete
         self.wsi_files = list(folder.glob("**/*.ndpi")) + list(folder.glob("**/*.svs"))
         self.wsi_files.sort()
@@ -54,23 +55,25 @@ class Task:
                 try:
                     self.append_log(f"Processing [{i+1}/{len(self.wsi_files )}]: {wsi_file.name}")
                     
+                    hdf5_tmp_path = wsi_file.with_suffix('.h5.tmp')
+                    hdf5_file = wsi_file.with_suffix(".h5")
                     # HDF5変換（既存の場合はスキップ）
-                    h5_file = wsi_file.with_suffix(".h5")
-                    if not h5_file.exists():
+                    if not hdf5_file.exists():
                         self.append_log("Converting to HDF5...")
-                        wp = WSIProcessor(str(wsi_file))
-                        wp.convert_to_hdf5(str(h5_file))
+                        wp = WSIProcessor(str(wsi_file), model_name=self.model_name)
+                        wp.convert_to_hdf5(str(hdf5_tmp_path))
+                        os.rename(hdf5_tmp_path, hdf5_file)
                         self.append_log("HDF5 conversion completed.")
                     
                     # ViT特徴量抽出（既存の場合はスキップ）
                     self.append_log("Extracting ViT features...")
-                    tp = TileProcessor(device="cuda")
-                    tp.evaluate_hdf5_file(str(h5_file))
+                    tp = TileProcessor(device="cuda", model_name=self.model_name)
+                    tp.evaluate_hdf5_file(str(hdf5_file))
                     self.append_log("ViT feature extraction completed.")
                     
                     # クラスタリングとUMAP生成
                     self.append_log("Starting clustering ...")
-                    cp = ClusterProcessor([h5_file])
+                    cp = ClusterProcessor([hdf5_file], model_name=self.model_name)
                     cp.anlyze_clusters(resolution=1.0)
                     self.append_log("Clustering completed.")
                     
@@ -89,7 +92,7 @@ class Task:
                     self.append_log("Starting thumbnail generation...")
                     thumb_path = Path(f"{base}_thumb.jpg")
                     if not thumb_path.exists():
-                        thumb_proc = PreviewClustersProcessor(str(h5_file), size=64)
+                        thumb_proc = PreviewClustersProcessor(str(hdf5_file), size=64, model_name=self.model_name)
                         img = thumb_proc.create_thumbnail(cluster_name='')
                         img.save(thumb_path)
                         self.append_log(f"Thumbnail generation completed. Saved to {thumb_path.name}")
@@ -174,10 +177,17 @@ class Watcher:
             if Status.is_processing_state(status):
                 continue
 
+            # \rを含むログから改行するため空白行を挿入
             print()
             print()
             print(f"detected: {folder}")
-            task = Task(folder, on_complete=lambda f: self.running_tasks.pop(f, None))
+            model_name = status.lower()
+            if model_name in ["uni", "gigapath", "virchow2"]:
+                print(f"Model names is specified. Using: {model_name}")
+            else:
+                model_name = DEFAULT_MODEL
+                print(f"Model names is not specified. Using: {model_name} (default)")
+            task = Task(folder, model_name, on_complete=lambda f: self.running_tasks.pop(f, None))
             self.running_tasks[folder] = task
             task.run()  # 同期実行に変更
 

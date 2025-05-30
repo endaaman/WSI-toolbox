@@ -16,7 +16,7 @@ import streamlit as st
 sys.path.append(str(P(__file__).parent))
 __package__ = 'wsi_toolbox'
 
-from .common import DEFAULT_MODEL, DEFAULT_MODEL_NAME
+from .common import DEFAULT_MODEL, DEFAULT_MODEL_LABEL
 from .utils.progress import tqdm_or_st
 from .utils.st import st_horizontal
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
@@ -309,7 +309,7 @@ def main():
             st.image(img)
     elif mode == 'WSI':
         st.subheader('WSIをパッチ分割し特徴量を抽出する', divider=True)
-        st.write(f'分割したパッチをHDF5に保存し、{DEFAULT_MODEL_NAME}特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
+        st.write(f'分割したパッチをHDF5に保存し、{DEFAULT_MODEL_LABEL}特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
 
         do_clustering = st.checkbox('クラスタリングも実行する', value=True, disabled=st.session_state.locked)
 
@@ -335,12 +335,12 @@ def main():
                         os.rename(hdf5_tmp_path, hdf5_path)
                         st.write('HDF5ファイルに変換完了。')
                     if matched_h5_entry is not None and matched_h5_entry['detail']['has_features']:
-                        st.write(f'すでに{DEFAULT_MODEL_NAME}特徴量を抽出済みなので処理をスキップしました。')
+                        st.write(f'すでに{DEFAULT_MODEL_LABEL}特徴量を抽出済みなので処理をスキップしました。')
                     else:
-                        with st.spinner(f'{DEFAULT_MODEL_NAME}特徴量を抽出中...', show_time=True):
+                        with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
                             tp = TileProcessor(device='cuda')
                             tp.evaluate_hdf5_file(hdf5_path, batch_size=256, overwrite=True, progress='streamlit')
-                        st.write(f'{DEFAULT_MODEL_NAME}特徴量の抽出完了。')
+                        st.write(f'{DEFAULT_MODEL_LABEL}特徴量の抽出完了。')
                     hdf5_paths.append(hdf5_path)
                     if i < len(selected_files)-1:
                         st.divider()
@@ -425,9 +425,9 @@ def main():
                         if not f['detail']['has_features']:
                             st.write(f'{f["name"]}の特徴量が未抽出なので、抽出を行います。')
                             tile_proc = TileProcessor(model_name=DEFAULT_MODEL, device='cuda')
-                            with st.spinner(f'{DEFAULT_MODEL_NAME}特徴量を抽出中...', show_time=True):
+                            with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
                                 tile_proc.evaluate_hdf5_file(f['path'], batch_size=256, progress='streamlit', overwrite=True)
-                            st.write(f'{DEFAULT_MODEL_NAME}特徴量の抽出完了。')
+                            st.write(f'{DEFAULT_MODEL_LABEL}特徴量の抽出完了。')
 
                     cluster_proc = ClusterProcessor(
                             [f['path'] for f in selected_files],

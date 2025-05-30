@@ -7,22 +7,22 @@ from timm.layers import SwiGLUPacked
 DEFAULT_BACKEND = 'tqdm'
 
 DEFAULT_MODEL = 'uni'
-DEFAULT_MODEL_NAME = 'UNI'
+DEFAULT_MODEL_LABEL = 'UNI'
 EMBEDDING_SIZE = 1024
 
 # DEFAULT_MODEL = 'gigapath'
-# DEFAULT_MODEL_NAME = 'GigaPath'
+# DEFAULT_MODEL_LABEL = 'GigaPath'
 # EMBEDDING_SIZE = 1536
 
 # DEFAULT_MODEL = 'virchow2'
-# DEFAULT_MODEL_NAME = 'Virchow2'
+# DEFAULT_MODEL_LABEL = 'Virchow2'
 # EMBEDDING_SIZE = 1280
 
 # DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'gigapath')
-# DEFAULT_MODEL_NAME = os.getenv('DEFAULT_MODEL_NAME', 'GigaPath')
+# DEFAULT_MODEL_LABEL = os.getenv('DEFAULT_MODEL_LABEL', 'GigaPath')
 
 print(f'DEFAULT_MODEL {DEFAULT_MODEL} ')
-print(f'DEFAULT_MODEL_NAME {DEFAULT_MODEL_NAME}')
+print(f'DEFAULT_MODEL_LABEL {DEFAULT_MODEL_LABEL}')
 
 def create_model(model_name):
     if model_name == 'uni':

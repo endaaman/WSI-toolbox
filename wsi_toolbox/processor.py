@@ -206,7 +206,7 @@ class WSIProcessor:
         self.mpp = self.original_mpp * self.scale
 
 
-    def convert_to_hdf5(self, hdf5_path, patch_size=256, progress=DEFAULT_BACKEND):
+    def convert_to_hdf5(self, hdf5_path, patch_size=256, rotate=False, progress=DEFAULT_BACKEND):
         S = patch_size   # Scaled patch size
         T = S*self.scale # Original patch size
         W, H = self.wsi.get_original_size()
@@ -262,9 +262,12 @@ class WSIProcessor:
                 for col, patch in enumerate(patches):
                     if is_white_patch(patch):
                         continue
-                    # Image.fromarray(patch).save(f'out/{row}_{col}.jpg')
+                    if rotate:
+                        patch = cv2.rotate(patch, cv2.ROTATE_180)
+                        coordinates.append(((x_patch_count-1-col)*S, (y_patch_count-1-row)*S))
+                    else:
+                        coordinates.append((col*S, row*S))
                     batch.append(patch)
-                    coordinates.append((col*S, row*S))
                 batch = np.array(batch)
                 total_patches[cursor:cursor+len(batch), ...] = batch
                 cursor += len(batch)
