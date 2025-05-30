@@ -4,13 +4,16 @@ import os
 from pathlib import Path as P
 import sys
 from enum import Enum, auto
+from typing import Optional, List, Dict, Any, Tuple
+from datetime import datetime
 
 import numpy as np
 from PIL import Image
 import h5py
 import torch
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
+from pydantic import BaseModel, Field
 
 torch.classes.__path__ = []
 import streamlit as st
@@ -34,6 +37,63 @@ DEFAULT_CLUSTER_RESOLUTION = 1.0
 MAX_CLUSTER_RESOLUTION = 3.0
 MIN_CLUSTER_RESOLUTION = 0.0
 CLUSTER_RESOLUTION_STEP = 0.1
+
+# File type definitions
+class FileType:
+    EMPTY = 'empty'
+    MIX = 'mix'
+    DIRECTORY = 'directory'
+    WSI = 'wsi'
+    HDF5 = 'hdf5'
+    IMAGE = 'image'
+    OTHER = 'other'
+
+FILE_TYPE_CONFIG = {
+    # FileType.EMPTY: {
+    #     'label': '空',
+    #     'icon': '🔳',
+    # },
+    FileType.DIRECTORY: {
+        'label': 'フォルダ',
+        'icon': '📁',
+    },
+    FileType.WSI: {
+        'label': 'WSI',
+        'icon': '🔬',
+        'extensions': {'.ndpi', '.svs'},
+    },
+    FileType.HDF5: {
+        'label': 'HDF5',
+        'icon': '📊',
+        'extensions': {'.h5'},
+    },
+    FileType.IMAGE: {
+        'label': '画像',
+        'icon': '🖼️',
+        'extensions': {'.bmp', '.gif', '.icns', '.ico', '.jpg', '.jpeg', '.png', '.tif', '.tiff'},
+    },
+    FileType.OTHER: {
+        'label': 'その他',
+        'icon': '📄',
+    },
+}
+
+def get_file_type(path: P) -> str:
+    """ファイルパスからファイルタイプを判定する"""
+    if path.is_dir():
+        return FileType.DIRECTORY
+
+    ext = path.suffix.lower()
+    for type_key, config in FILE_TYPE_CONFIG.items():
+        if 'extensions' in config and ext in config['extensions']:
+            return type_key
+
+    return FileType.OTHER
+
+def get_file_type_display(type_key: str) -> str:
+    """ファイルタイプの表示用ラベルとアイコンを取得する"""
+    config = FILE_TYPE_CONFIG.get(type_key, FILE_TYPE_CONFIG[FileType.OTHER])
+    return f"{config['icon']} {config['label']}"
 
 def add_beforeunload_js():
     js = """
@@ -75,26 +135,50 @@ STATUS_READY = 0
 STATUS_BLOCKED = 1
 STATUS_UNSUPPORTED = 2
 
-def is_wsi_file(file_path):
-    extensions = ['.ndpi', '.svs']
-    return P(file_path).suffix.lower() in extensions
 
-def is_h5_file(file_path):
-    return P(file_path).suffix.lower() == '.h5'
+class HDF5Detail(BaseModel):
+    status: int
+    has_features: bool
+    cluster_names: List[str]
+    patch_count: int
+    mpp: float
+    cols: int
+    rows: int
+    desc: Optional[str] = None
 
-def get_hdf5_detail(hdf_path):
+class FileEntry(BaseModel):
+    name: str
+    path: str
+    type: str
+    size: int
+    modified: datetime
+    detail: Optional[HDF5Detail] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """AG Grid用の辞書に変換"""
+        return {
+            'name': self.name,
+            'path': self.path,
+            'type': self.type,
+            'size': self.size,
+            'modified': self.modified,
+            'detail': self.detail.model_dump() if self.detail else None
+        }
+
+
+def get_hdf5_detail(hdf_path) -> Optional[HDF5Detail]:
     try:
         with h5py.File(hdf_path, 'r') as f:
             if 'metadata/patch_count' not in f:
-                return {
-                    'status': STATUS_UNSUPPORTED,
-                    'has_features': False,
-                    'cluster_names': ['未施行'],
-                    'patch_count': 0,
-                    'mpp': 0,
-                    'cols': 0,
-                    'rows': 0,
-                }
+                return HDF5Detail(
+                    status=STATUS_UNSUPPORTED,
+                    has_features=False,
+                    cluster_names=['未施行'],
+                    patch_count=0,
+                    mpp=0,
+                    cols=0,
+                    rows=0,
+                )
             patch_count = f['metadata/patch_count'][()]
             has_features = (f'{DEFAULT_MODEL}/features' in f) and (len(f[f'{DEFAULT_MODEL}/features']) == patch_count)
             cluster_names = ['未施行']
@@ -103,151 +187,178 @@ def get_hdf5_detail(hdf_path):
                     k.replace('clusters_', '').replace('clusters', 'デフォルト')
                     for k in f[DEFAULT_MODEL].keys() if re.match(r'^clusters.*', k)
                 ]
-            return {
-                'status': STATUS_READY,
-                'has_features': has_features,
-                'cluster_names': cluster_names,
-                'patch_count': patch_count,
-                'mpp': f['metadata/mpp'][()],
-                'cols': f['metadata/cols'][()],
-                'rows': f['metadata/rows'][()],
-            }
+            return HDF5Detail(
+                status=STATUS_READY,
+                has_features=has_features,
+                cluster_names=cluster_names,
+                patch_count=patch_count,
+                mpp=f['metadata/mpp'][()],
+                cols=f['metadata/cols'][()],
+                rows=f['metadata/rows'][()],
+            )
     except BlockingIOError:
-        return {
-            'status': STATUS_BLOCKED,
-            'has_features': False,
-            'cluster_names': [''],
-            'patch_count': 0,
-            'mpp': 0,
-            'cols': 0,
-            'rows': 0,
-            'desc': '他システムで処理中',
-        }
+        return HDF5Detail(
+            status=STATUS_BLOCKED,
+            has_features=False,
+            cluster_names=[''],
+            patch_count=0,
+            mpp=0,
+            cols=0,
+            rows=0,
+            desc='他システムで処理中',
+        )
 
-
-IMAGE_EXTENSIONS = { '.bmp', '.gif', '.icns', '.ico', '.jpg', '.jpeg', '.png', '.tif', '.tiff', }
-def is_image_file(file_path):
-    return P(file_path).suffix.lower() in IMAGE_EXTENSIONS
-
-
-def list_files(directory):
+def list_files(directory) -> List[FileEntry]:
     files = []
     directories = []
 
     for item in sorted(os.listdir(directory)):
-        item_path = os.path.join(directory, item)
+        item_path = P(os.path.join(directory, item))
+        file_type = get_file_type(item_path)
+        type_config = FILE_TYPE_CONFIG[file_type]
 
-        if os.path.isfile(item_path):
-            icon = "📄"
-            file_type = "Other"
-            detail = None
-            if is_wsi_file(item_path):
-                icon = '🔬'
-                file_type = "WSI"
-            elif is_h5_file(item_path):
-                icon = '📊'
-                file_type = "HDF5"
-                detail = get_hdf5_detail(item_path)
-            elif is_image_file(item_path):
-                icon = '🖼️'
-                file_type = "Image"
+        if file_type == FileType.DIRECTORY:
+            directories.append(FileEntry(
+                name=f"{type_config['icon']} {item}",
+                path=str(item_path),
+                type=file_type,
+                size=0,
+                modified=pd.to_datetime(os.path.getmtime(item_path), unit='s'),
+                detail=None
+            ))
+            continue
 
-            size_bytes = os.path.getsize(item_path)
-            if size_bytes > 1024*1024*1024:
-                size_str = f'{size_bytes/1024/1024/1024:.1f} GB'
-            elif size_bytes > 1024*1024:
-                size_str = f'{size_bytes/1024/1024:.1f} MB'
-            elif size_bytes > 1024:
-                size_str = f'{size_bytes/1024:.1f} KB'
-            else:
-                size_str = f'{size_bytes} bytes'
+        detail = None
+        if file_type == FileType.HDF5:
+            detail = get_hdf5_detail(str(item_path))
 
-            files.append({
-                'selected': False,
-                'name': f'{item} {icon}',
-                'path': item_path,
-                'type': file_type,
-                'size': size_str,
-                'size_bytes': size_bytes,
-                'modified': pd.to_datetime(os.path.getmtime(item_path), unit='s'),
-                'detail': detail,
-            })
+        exists = item_path.exists()
 
-        elif os.path.isdir(item_path):
-            directories.append({
-                'selected': False,
-                'name': f'📁 {item}',
-                'path': item_path,
-                'type': 'Directory',
-                'size': '',
-                'size_bytes': 0,
-                'modified': pd.to_datetime(os.path.getmtime(item_path), unit='s'),
-                'detail': None,
-            })
+        files.append(FileEntry(
+            name=f"{type_config['icon']} {item}",
+            path=str(item_path),
+            type=file_type,
+            size=os.path.getsize(item_path) if exists else 0,
+            modified=pd.to_datetime(os.path.getmtime(item_path), unit='s') if exists else 0,
+            detail=detail
+        ))
 
     all_items = directories + files
     return all_items
 
 
-def get_mode_and_multi(selected_files):
-    if len(selected_files) == 0:
-        return 'Empty', False
-    if len(selected_files) == 1:
-        selected = selected_files[0]
-        return selected['type'], False
+def render_file_list(files: List[FileEntry]) -> List[FileEntry]:
+    """ファイル一覧をAG Gridで表示し、選択されたファイルを返します"""
+    if not files:
+        st.warning('ファイルが選択されていません')
+        return []
 
-    type_set = set([f['type'] for f in selected_files])
-    if len(type_set) > 1:
-        return 'Mix', True
-    t = next(iter(type_set))
-    return t, True
+    # FileEntryのリストを辞書のリストに変換し、DataFrameに変換
+    data = [entry.to_dict() for entry in files]
+    df = pd.DataFrame(data)
+
+    # グリッドの設定
+    gb = GridOptionsBuilder.from_dataframe(df)
+
+    # カラム設定
+    gb.configure_column(
+        'name',
+        header_name='ファイル名',
+        width=300,
+        sortable=True,
+    )
+
+    gb.configure_column(
+        'type',
+        header_name='種別',
+        width=100,
+        filter='agSetColumnFilter',
+        sortable=True,
+        valueGetter=JsCode("""
+        function(params) {
+            const type = params.data.type;
+            const config = {
+                'directory': { label: 'フォルダ' },
+                'wsi': { label: 'WSI' },
+                'hdf5': { label: 'HDF5' },
+                'image': { label: '画像' },
+                'other': { label: 'その他' }
+            };
+            const typeConfig = config[type] || config['other'];
+            return typeConfig.label;
+        }
+        """)
+    )
+
+    gb.configure_column(
+        'size',
+        header_name='ファイルサイズ',
+        width=120,
+        sortable=True,
+        valueGetter=JsCode("""
+        function(params) {
+            const size = params.data.size;
+            if (size === 0) return '';
+            if (size < 1024) return size + ' B';
+            if (size < 1024 * 1024) return (size / 1024).toFixed() + ' KB';
+            if (size < 1024 * 1024 * 1024) return (size / (1024 * 1024)).toFixed() + ' MB';
+            return (size / (1024 * 1024 * 1024)).toFixed() + ' GB';
+        }
+        """)
+    )
+
+    gb.configure_column(
+        'modified',
+        header_name='最終更新',
+        width=180,
+        type=['dateColumnFilter', 'customDateTimeFormat'],
+        custom_format_string='yyyy/MM/dd HH:mm:ss',
+        sortable=True
+    )
+
+    # 内部カラムを非表示
+    gb.configure_column('path', hide=True)
+    gb.configure_column('detail', hide=True)
+
+    # 選択設定
+    gb.configure_selection(
+        selection_mode="multiple",
+        use_checkbox=True,
+        header_checkbox=True,
+        pre_selected_rows=[]
+    )
+
+    # グリッドオプションの構築
+    grid_options = gb.build()
+
+    # AG Gridの表示
+    grid_response = AgGrid(
+        df,
+        gridOptions=grid_options,
+        height=400,
+        fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True,
+        theme='streamlit',
+        enable_enterprise_modules=False,
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        reload_data=True
+    )
+
+    selected_rows = grid_response['selected_rows']
+    if selected_rows is None:
+        return []
+
+    print(selected_rows.index)
+
+    selected_files = [files[int(i)] for i in selected_rows.index]
+    return selected_files
 
 
-def format_size(size_bytes):
-    if size_bytes < 1024:
-        return f'{size_bytes} B'
-    elif size_bytes < 1024 * 1024:
-        return f'{size_bytes/1024:.1f} KB'
-    elif size_bytes < 1024 * 1024 * 1024:
-        return f'{size_bytes/(1024*1024):.1f} MB'
-    else:
-        return f'{size_bytes/(1024*1024*1024):.1f} GB'
-
-def get_size_bytes(size_str):
-    if not size_str:
-        return 0
-    if 'GB' in size_str:
-        return float(size_str.replace(' GB', '')) * 1024 * 1024 * 1024
-    elif 'MB' in size_str:
-        return float(size_str.replace(' MB', '')) * 1024 * 1024
-    elif 'KB' in size_str:
-        return float(size_str.replace(' KB', '')) * 1024
-    elif 'bytes' in size_str:
-        return float(size_str.replace(' bytes', ''))
-    return 0
 
 BASE_DIR = os.getenv('BASE_DIR', 'data')
 
-def render_empty():
-    """Render UI for when no files are selected."""
-    st.write('ファイル一覧の左の列のチェックボックスからファイルを選択してください。')
 
-def render_mode_directory(selected_files, multi):
-    """Render UI for directory selection mode."""
-    if multi:
-        st.warning('複数フォルダが選択されました。')
-    else:
-        if st.button('このフォルダに移動'):
-            st.session_state.current_dir = selected_files[0]['path']
-            st.rerun()
-
-def render_mode_image(selected_files):
-    """Render UI for image viewing mode."""
-    for f in selected_files:
-        img = Image.open(f['path'])
-        st.image(img)
-
-def render_mode_wsi(selected_files, df):
+def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
     """Render UI for WSI processing mode."""
     st.subheader('WSIをパッチ分割し特徴量を抽出する', divider=True)
     st.write(f'分割したパッチをHDF5に保存し、{DEFAULT_MODEL_LABEL}特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
@@ -260,14 +371,15 @@ def render_mode_wsi(selected_files, df):
         st.write(f'WSIから画像をパッチ分割しHDF5ファイルを構築します。')
         with st.container(border=True):
             for i, f in enumerate(selected_files):
-                st.write(f'**[{i+1}/{len(selected_files)}] 処理中のWSIファイル: {f["name"]}**')
-                wsi_path = f['path']
+                st.write(f'**[{i+1}/{len(selected_files)}] 処理中のWSIファイル: {f.name}**')
+                wsi_path = f.path
                 p = P(wsi_path)
                 hdf5_path = str(p.with_suffix('.h5'))
                 hdf5_tmp_path = str(p.with_suffix('.h5.tmp'))
-                matched_h5_entry = df[df['path'] == hdf5_path]
-                matched_h5_entry = matched_h5_entry.iloc[0] if len(matched_h5_entry)>0 else None
-                if matched_h5_entry is not None and matched_h5_entry['detail']['status'] == STATUS_READY:
+                
+                # 既存のHDF5ファイルを検索
+                matched_h5_entry = next((f for f in files if f.path == hdf5_path), None)
+                if matched_h5_entry is not None and matched_h5_entry.detail and matched_h5_entry.detail.status == STATUS_READY:
                     st.write(f'すでにHDF5ファイル（{os.path.basename(hdf5_path)}）が存在しているので分割処理をスキップしました。')
                 else:
                     with st.spinner('WSIを分割しHDF5ファイルを構成しています...', show_time=True):
@@ -275,7 +387,8 @@ def render_mode_wsi(selected_files, df):
                         wp.convert_to_hdf5(hdf5_tmp_path, patch_size=PATCH_SIZE, progress='streamlit')
                     os.rename(hdf5_tmp_path, hdf5_path)
                     st.write('HDF5ファイルに変換完了。')
-                if matched_h5_entry is not None and matched_h5_entry['detail']['has_features']:
+
+                if matched_h5_entry is not None and matched_h5_entry.detail and matched_h5_entry.detail.has_features:
                     st.write(f'すでに{DEFAULT_MODEL_LABEL}特徴量を抽出済みなので処理をスキップしました。')
                 else:
                     with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
@@ -290,8 +403,8 @@ def render_mode_wsi(selected_files, df):
             st.write(f'クラスタリングを行います。')
             with st.container(border=True):
                 for i, (f, hdf5_path) in enumerate(zip(selected_files, hdf5_paths)):
-                    st.write(f'**[{i+1}/{len(selected_files)}] 処理ファイル: {f["name"]}**')
-                    base, ext = os.path.splitext(f['path'])
+                    st.write(f'**[{i+1}/{len(selected_files)}] 処理ファイル: {f.name}**')
+                    base, ext = os.path.splitext(f.path)
                     umap_path = f'{base}_umap.png'
                     thumb_path = f'{base}_thumb.jpg'
                     with st.spinner(f'クラスタリング中...', show_time=True):
@@ -315,10 +428,18 @@ def render_mode_wsi(selected_files, df):
         if st.button('リセットする', on_click=unlock):
             st.rerun()
 
-def render_mode_hdf5(selected_files, multi):
+def render_mode_hdf5(selected_files: List[FileEntry]):
     """Render UI for HDF5 analysis mode."""
     st.subheader('HDF5ファイル解析オプション', divider=True)
-    df_details = pd.DataFrame([{'name': f['name'], **f['detail']} for f in selected_files])
+    
+    # 選択されたファイルの詳細情報を取得
+    details = [
+        {'name': f.name, **f.detail.model_dump()} 
+        for f in selected_files 
+        if f.detail
+    ]
+    df_details = pd.DataFrame(details)
+    
     if len(set(df_details['status'])) > 1:
         st.error('サポートされていないHDF5ファイルが含まれています。')
     elif np.all(df_details['status'] == STATUS_UNSUPPORTED):
@@ -344,7 +465,7 @@ def render_mode_hdf5(selected_files, multi):
         form = st.form(key='form_hdf5')
 
         cluster_name = ''
-        if multi:
+        if len(selected_files) > 1:
             cluster_name = form.text_input(
                     'クラスタ名（複数スライドで同時クラスタリングを行う場合は、単一条件と区別するための名称が必要になります）',
                     disabled=st.session_state.locked,
@@ -362,26 +483,26 @@ def render_mode_hdf5(selected_files, multi):
 
         if form.form_submit_button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
             set_locked_state(True)
-            if multi and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
+            if len(selected_files) > 1 and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
                 st.error('クラスタ名は小文字半角英数記号のみ入力してください')
             else:
                 for f in selected_files:
-                    if not f['detail']['has_features']:
-                        st.write(f'{f["name"]}の特徴量が未抽出なので、抽出を行います。')
+                    if not f.detail or not f.detail.has_features:
+                        st.write(f'{f.name}の特徴量が未抽出なので、抽出を行います。')
                         tile_proc = TileProcessor(model_name=DEFAULT_MODEL, device='cuda')
                         with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
-                            tile_proc.evaluate_hdf5_file(f['path'], batch_size=BATCH_SIZE, progress='streamlit', overwrite=True)
+                            tile_proc.evaluate_hdf5_file(f.path, batch_size=BATCH_SIZE, progress='streamlit', overwrite=True)
                         st.write(f'{DEFAULT_MODEL_LABEL}特徴量の抽出完了。')
 
                 cluster_proc = ClusterProcessor(
-                        [f['path'] for f in selected_files],
+                        [f.path for f in selected_files],
                         model_name=DEFAULT_MODEL,
                         cluster_name=cluster_name,
                         )
-                t = 'と'.join([f['name'] for f in selected_files])
+                t = 'と'.join([f.name for f in selected_files])
                 with st.spinner(f'{t}をクラスタリング中...', show_time=True):
-                    p = P(selected_files[0]['path'])
-                    if multi:
+                    p = P(selected_files[0].path)
+                    if len(selected_files) > 1:
                         umap_path = str(p.parent / f'{cluster_name}_umap.png')
                     else:
                         umap_path = str(p.parent / f'{p.stem}_umap.png')
@@ -400,10 +521,10 @@ def render_mode_hdf5(selected_files, multi):
                 st.divider()
 
                 with st.spinner('オーバービュー生成中...', show_time=True):
-                    for file in selected_files:
-                        thumb_proc = PreviewClustersProcessor(file['path'], size=THUMBNAIL_SIZE)
-                        p = P(file['path'])
-                        if multi:
+                    for f in selected_files:
+                        thumb_proc = PreviewClustersProcessor(f.path, size=THUMBNAIL_SIZE)
+                        p = P(f.path)
+                        if len(selected_files) > 1:
                             thumb_path = str(p.parent / f'{cluster_name}_{p.stem}_thumb.jpg')
                         else:
                             thumb_path = str(p.parent / f'{p.stem}_thumb.jpg')
@@ -431,105 +552,19 @@ def render_navigation(current_dir_abs, default_root_abs):
         if st.button('フォルダ更新', disabled=st.session_state.locked):
             st.rerun()
 
-def render_file_list(files):
-    """ファイル一覧をAG Gridで表示し、選択されたファイルを返します"""
-    if not files:
-        st.warning('ファイルが選択されていません')
-        return None, None
 
-    df = pd.DataFrame(files)
-    
-    # グリッドの設定
-    gb = GridOptionsBuilder.from_dataframe(df)
-    
-    # カラム設定
-    gb.configure_column(
-        'selected',
-        header_name='選択',
-        type=['checkboxColumn'],
-        width=70,
-        pinned='left'
-    )
-    
-    gb.configure_column(
-        'name',
-        header_name='ファイル名',
-        width=300,
-        pinned='left'
-    )
-    
-    gb.configure_column(
-        'type',
-        header_name='種別',
-        width=100,
-        filter='agSetColumnFilter'
-    )
-    
-    gb.configure_column(
-        'size',
-        header_name='ファイルサイズ',
-        width=120,
-        type=['customNumericFormat'],
-        custom_cell_renderer=JsCode("""
-        function(params) {
-            return params.value;
-        }
-        """)
-    )
-    
-    gb.configure_column(
-        'size_bytes',
-        header_name='サイズ（バイト）',
-        width=120,
-        type=['numericColumn', 'numberColumnFilter'],
-        sortable=True,
-        sort='desc',
-        hide=True
-    )
-    
-    gb.configure_column(
-        'modified',
-        header_name='最終変更',
-        width=180,
-        type=['dateColumnFilter', 'customDateTimeFormat'],
-        custom_format_string='yyyy/MM/dd HH:mm:ss'
-    )
-    
-    # 内部カラムを非表示
-    gb.configure_column('path', hide=True)
-    gb.configure_column('detail', hide=True)
-    
-    # グリッドオプション設定
-    grid_options = gb.build()
-    grid_options.update({
-        'rowSelection': 'multiple',
-        'suppressRowClickSelection': True,
-        'pagination': True,
-        'paginationPageSize': 100,
-        'domLayout': 'autoHeight'
-    })
-    
-    # AG Gridの表示
-    grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        height=400,
-        fit_columns_on_grid_load=True,
-        allow_unsafe_jscode=True,
-        theme='streamlit',
-        enable_enterprise_modules=False,
-        update_mode='VALUE_CHANGED',
-        reload_data=True
-    )
-    
-    # 選択されたファイルの取得
-    selected_rows = grid_response.get('selected_rows', [])
-    selected_files = [
-        file for file in files
-        if any(file['path'] == row['path'] for row in selected_rows)
-    ]
-    
-    return df, selected_files
+def recognize_file_type(selected_files: List[FileEntry]) -> FileType:
+    if len(selected_files) == 0:
+        return FileType.EMPTY
+    if len(selected_files) == 1:
+        f = selected_files[0]
+        return f.type
+
+    type_set = set([f.type for f in selected_files])
+    if len(type_set) > 1:
+        return FileType.MIX
+    t = next(iter(type_set))
+    return t
 
 def main():
     add_beforeunload_js()
@@ -548,29 +583,33 @@ def main():
     render_navigation(current_dir_abs, default_root_abs)
 
     files = list_files(st.session_state.current_dir)
-    df, selected_files = render_file_list(files)
-    
-    if df is None:
-        return
+    selected_files = render_file_list(files)
+    multi = len(selected_files) > 1
+    file_type = recognize_file_type(selected_files)
 
-    mode, multi = get_mode_and_multi(selected_files)
-
-    if mode == 'Empty':
-        render_empty()
-    elif mode == 'Directory':
-        render_mode_directory(selected_files, multi)
-    elif mode == 'Other':
+    if file_type == FileType.WSI:
+        render_mode_wsi(files, selected_files)
+    elif file_type == FileType.HDF5:
+        render_mode_hdf5(selected_files)
+    elif file_type == FileType.IMAGE:
+        for f in selected_files:
+            img = Image.open(f.path)
+            st.image(img)
+    elif file_type == FileType.EMPTY:    
+        st.write('ファイル一覧の左の列のチェックボックスからファイルを選択してください。')
+    elif file_type == FileType.DIRECTORY:
+        if multi:
+            st.warning('複数フォルダが選択されました。')
+        else:
+            if st.button('このフォルダに移動'):
+                st.session_state.current_dir = selected_files[0].path
+                st.rerun()
+    elif file_type == FileType.OTHER:
         st.warning('WSI(.ndpi, .svs)ファイルもしくはHDF5ファイル(.h5)を選択しください。')
-    elif mode == 'Mix':
+    elif file_type == FileType.MIX:
         st.warning('単一種類のファイルを選択してください。')
-    elif mode == 'Image':
-        render_mode_image(selected_files)
-    elif mode == 'WSI':
-        render_mode_wsi(selected_files, df)
-    elif mode == 'HDF5':
-        render_mode_hdf5(selected_files, multi)
     else:
-        st.warning(f'Invalid mode: {mode}')
+        st.warning(f'Invalid file type: {file_type}')
 
 if __name__ == '__main__':
     main()
