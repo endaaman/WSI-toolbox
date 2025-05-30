@@ -348,8 +348,6 @@ def render_file_list(files: List[FileEntry]) -> List[FileEntry]:
     if selected_rows is None:
         return []
 
-    print(selected_rows.index)
-
     selected_files = [files[int(i)] for i in selected_rows.index]
     return selected_files
 
@@ -376,7 +374,7 @@ def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
                 p = P(wsi_path)
                 hdf5_path = str(p.with_suffix('.h5'))
                 hdf5_tmp_path = str(p.with_suffix('.h5.tmp'))
-                
+
                 # 既存のHDF5ファイルを検索
                 matched_h5_entry = next((f for f in files if f.path == hdf5_path), None)
                 if matched_h5_entry is not None and matched_h5_entry.detail and matched_h5_entry.detail.status == STATUS_READY:
@@ -431,15 +429,15 @@ def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
 def render_mode_hdf5(selected_files: List[FileEntry]):
     """Render UI for HDF5 analysis mode."""
     st.subheader('HDF5ファイル解析オプション', divider=True)
-    
+
     # 選択されたファイルの詳細情報を取得
     details = [
-        {'name': f.name, **f.detail.model_dump()} 
-        for f in selected_files 
+        {'name': f.name, **f.detail.model_dump()}
+        for f in selected_files
         if f.detail
     ]
     df_details = pd.DataFrame(details)
-    
+
     if len(set(df_details['status'])) > 1:
         st.error('サポートされていないHDF5ファイルが含まれています。')
     elif np.all(df_details['status'] == STATUS_UNSUPPORTED):
@@ -595,7 +593,7 @@ def main():
         for f in selected_files:
             img = Image.open(f.path)
             st.image(img)
-    elif file_type == FileType.EMPTY:    
+    elif file_type == FileType.EMPTY:
         st.write('ファイル一覧の左の列のチェックボックスからファイルを選択してください。')
     elif file_type == FileType.DIRECTORY:
         if multi:
