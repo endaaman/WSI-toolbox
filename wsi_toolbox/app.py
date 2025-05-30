@@ -3,6 +3,7 @@ import time
 import os
 from pathlib import Path as P
 import sys
+from enum import Enum, auto
 
 import numpy as np
 from PIL import Image
@@ -23,6 +24,15 @@ from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClu
 
 
 Image.MAX_IMAGE_PIXELS = 3_500_000_000
+
+# Global constants
+BATCH_SIZE = 256
+PATCH_SIZE = 256
+THUMBNAIL_SIZE = 64
+DEFAULT_CLUSTER_RESOLUTION = 1.0
+MAX_CLUSTER_RESOLUTION = 3.0
+MIN_CLUSTER_RESOLUTION = 0.0
+CLUSTER_RESOLUTION_STEP = 0.1
 
 def add_beforeunload_js():
     js = """
@@ -247,7 +257,7 @@ def render_mode_wsi(selected_files, df):
                 else:
                     with st.spinner('WSIを分割しHDF5ファイルを構成しています...', show_time=True):
                         wp = WSIProcessor(wsi_path)
-                        wp.convert_to_hdf5(hdf5_tmp_path, patch_size=256, progress='streamlit')
+                        wp.convert_to_hdf5(hdf5_tmp_path, patch_size=PATCH_SIZE, progress='streamlit')
                     os.rename(hdf5_tmp_path, hdf5_path)
                     st.write('HDF5ファイルに変換完了。')
                 if matched_h5_entry is not None and matched_h5_entry['detail']['has_features']:
@@ -255,7 +265,7 @@ def render_mode_wsi(selected_files, df):
                 else:
                     with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
                         tp = TileProcessor(device='cuda')
-                        tp.evaluate_hdf5_file(hdf5_path, batch_size=256, overwrite=True, progress='streamlit')
+                        tp.evaluate_hdf5_file(hdf5_path, batch_size=BATCH_SIZE, overwrite=True, progress='streamlit')
                     st.write(f'{DEFAULT_MODEL_LABEL}特徴量の抽出完了。')
                 hdf5_paths.append(hdf5_path)
                 if i < len(selected_files)-1:
@@ -274,12 +284,12 @@ def render_mode_wsi(selected_files, df):
                                 [hdf5_path],
                                 model_name=DEFAULT_MODEL,
                                 cluster_name='')
-                        cluster_proc.anlyze_clusters(resolution=1.0, progress='streamlit')
+                        cluster_proc.anlyze_clusters(resolution=DEFAULT_CLUSTER_RESOLUTION, progress='streamlit')
                         cluster_proc.plot_umap(fig_path=umap_path)
                     st.write(f'クラスタリング結果を{os.path.basename(umap_path)}に出力しました。')
 
                     with st.spinner('オーバービュー生成中', show_time=True):
-                        thumb_proc = PreviewClustersProcessor(hdf5_path, size=64)
+                        thumb_proc = PreviewClustersProcessor(hdf5_path, size=THUMBNAIL_SIZE)
                         img = thumb_proc.create_thumbnail(cluster_name='', progress='streamlit')
                         img.save(thumb_path)
                     st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
@@ -327,8 +337,11 @@ def render_mode_hdf5(selected_files, multi):
             cluster_name = cluster_name.lower()
 
         resolution = form.slider('クラスタリング解像度（Leiden resolution）',
-                                 min_value=0.0, max_value=3.0,
-                                 value=1.0, step=0.1, disabled=st.session_state.locked)
+                                 min_value=MIN_CLUSTER_RESOLUTION,
+                                 max_value=MAX_CLUSTER_RESOLUTION,
+                                 value=DEFAULT_CLUSTER_RESOLUTION,
+                                 step=CLUSTER_RESOLUTION_STEP,
+                                 disabled=st.session_state.locked)
         overwrite = form.checkbox('計算済みクラスタ結果を再利用しない（再計算を行う）', value=False, disabled=st.session_state.locked)
         use_umap_embs = form.checkbox('エッジの重み算出にUMAPの埋め込みを使用する', value=False, disabled=st.session_state.locked)
 
@@ -342,7 +355,7 @@ def render_mode_hdf5(selected_files, multi):
                         st.write(f'{f["name"]}の特徴量が未抽出なので、抽出を行います。')
                         tile_proc = TileProcessor(model_name=DEFAULT_MODEL, device='cuda')
                         with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
-                            tile_proc.evaluate_hdf5_file(f['path'], batch_size=256, progress='streamlit', overwrite=True)
+                            tile_proc.evaluate_hdf5_file(f['path'], batch_size=BATCH_SIZE, progress='streamlit', overwrite=True)
                         st.write(f'{DEFAULT_MODEL_LABEL}特徴量の抽出完了。')
 
                 cluster_proc = ClusterProcessor(
@@ -373,7 +386,7 @@ def render_mode_hdf5(selected_files, multi):
 
                 with st.spinner('オーバービュー生成中...', show_time=True):
                     for file in selected_files:
-                        thumb_proc = PreviewClustersProcessor(file['path'], size=64)
+                        thumb_proc = PreviewClustersProcessor(file['path'], size=THUMBNAIL_SIZE)
                         p = P(file['path'])
                         if multi:
                             thumb_path = str(p.parent / f'{cluster_name}_{p.stem}_thumb.jpg')
