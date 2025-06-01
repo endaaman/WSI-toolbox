@@ -194,6 +194,9 @@ class WSIProcessor:
         else:
             raise ValueError('Invalid engine', engine)
 
+        if extra:
+            raise ValueError('Unprocessed extra arguments', extra)
+
         self.target_level = 0
         self.original_mpp = self.wsi.get_mpp()
 
@@ -555,6 +558,8 @@ class PreviewClustersProcessor(BasePreviewProcessor):
         cluster_path = f'{self.model_name}/clusters'
         if self.cluster_name:
             cluster_path += f'_{self.cluster_name}'
+        if cluster_path not in f:
+            raise RuntimeError(f'{cluster_path} does not exist in {self.hdf5_path}')
         self.clusters = f[cluster_path][:]
 
         font = ImageFont.truetype(font=get_platform_font(), size=font_size)

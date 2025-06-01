@@ -60,6 +60,7 @@ class CLI(BaseMLCLI):
         overwrite: bool = param(False, s='-O')
         engine: str = param('auto', choices=['auto', 'openslide', 'tifffile'])
         mpp: float = 0
+        rotate: bool = False
 
     def run_wsi2h5(self, a:Wsi2h5Args):
         output_path = a.output_path
@@ -78,10 +79,8 @@ class CLI(BaseMLCLI):
             os.makedirs(d, exist_ok=True)
 
         p = WSIProcessor(a.input_path, engine=a.engine, mpp=a.mpp)
-        p.convert_to_hdf5(output_path, patch_size=a.patch_size, progress='tqdm')
-
+        p.convert_to_hdf5(output_path, patch_size=a.patch_size, rotate=a.rotate, progress='tqdm')
         print('done')
-
 
     class ProcessPatchesArgs(CommonArgs):
         input_path: str = Field(..., l='--in', s='-i')

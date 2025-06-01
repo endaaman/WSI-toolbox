@@ -22,12 +22,26 @@ HORIZONTAL_STYLE = """
     div[data-testid="stVerticalBlock"]:has(> .element-container .horizontal-marker) div {
         width: max-content !important;
     }
-    /* Just an example of how you would style buttons, if desired */
-    /*
-    div[data-testid="stVerticalBlock"]:has(> .element-container .horizontal-marker) button {
-        border-color: red;
+    /* Selectbox container */
+    div[data-testid="stVerticalBlock"]:has(> .element-container .horizontal-marker) div[data-testid="stSelectbox"] {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 0.5rem !important;
     }
-    */
+    /* Selectbox label */
+    div[data-testid="stVerticalBlock"]:has(> .element-container .horizontal-marker) div[data-testid="stWidgetLabel"] {
+        margin-bottom: 0 !important;
+        padding-right: 0.5rem !important;
+    }
+    /* Selectbox input container */
+    div[data-testid="stVerticalBlock"]:has(> .element-container .horizontal-marker) div[data-baseweb="select"] {
+        min-width: 120px !important;
+    }
+    /* Selectbox dropdown */
+    div[data-testid="stVerticalBlock"]:has(> .element-container .horizontal-marker) div[role="listbox"] {
+        min-width: 120px !important;
+    }
 </style>
 """
 

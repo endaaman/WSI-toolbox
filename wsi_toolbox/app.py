@@ -21,7 +21,7 @@ import streamlit as st
 sys.path.append(str(P(__file__).parent))
 __package__ = 'wsi_toolbox'
 
-from .common import DEFAULT_MODEL, DEFAULT_MODEL_LABEL
+from .common import DEFAULT_MODEL, model_labels, model_names, model_names_by_label
 from .utils.progress import tqdm_or_st
 from .utils.st import st_horizontal
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
@@ -136,6 +136,35 @@ STATUS_BLOCKED = 1
 STATUS_UNSUPPORTED = 2
 
 
+def render_navigation(current_dir_abs, default_root_abs):
+    """Render navigation buttons for moving between directories."""
+    with st_horizontal():
+        if current_dir_abs == default_root_abs:
+            st.button('↑ 親フォルダへ', disabled=True)
+        else:
+            if st.button('↑ 親フォルダへ', disabled=st.session_state.locked):
+                parent_dir = os.path.dirname(current_dir_abs)
+                if os.path.commonpath([default_root_abs]) == os.path.commonpath([default_root_abs, parent_dir]):
+                    st.session_state.current_dir = parent_dir
+                    st.rerun()
+        if st.button('フォルダ更新', disabled=st.session_state.locked):
+            st.rerun()
+
+        model_label = model_labels[st.session_state.model]
+        new_model_label = st.selectbox(
+            '使用モデル',
+            list(model_labels.values()),
+            index=list(model_labels.values()).index(model_label),
+            disabled=st.session_state.locked
+        )
+        new_model = model_names_by_label[new_model_label]
+
+        # モデルが変更された場合、即座にリロード
+        if new_model != st.session_state.model:
+            print('model changed', st.session_state.model, '->', new_model)
+            st.session_state.model = new_model
+            st.rerun()
+
 class HDF5Detail(BaseModel):
     status: int
     has_features: bool
@@ -168,6 +197,7 @@ class FileEntry(BaseModel):
 
 def get_hdf5_detail(hdf_path) -> Optional[HDF5Detail]:
     try:
+        model_name = st.session_state.model
         with h5py.File(hdf_path, 'r') as f:
             if 'metadata/patch_count' not in f:
                 return HDF5Detail(
@@ -180,12 +210,12 @@ def get_hdf5_detail(hdf_path) -> Optional[HDF5Detail]:
                     rows=0,
                 )
             patch_count = f['metadata/patch_count'][()]
-            has_features = (f'{DEFAULT_MODEL}/features' in f) and (len(f[f'{DEFAULT_MODEL}/features']) == patch_count)
+            has_features = (f'{model_name}/features' in f) and (len(f[f'{model_name}/features']) == patch_count)
             cluster_names = ['未施行']
-            if DEFAULT_MODEL in f:
+            if model_name in f:
                 cluster_names = [
                     k.replace('clusters_', '').replace('clusters', 'デフォルト')
-                    for k in f[DEFAULT_MODEL].keys() if re.match(r'^clusters.*', k)
+                    for k in f[model_name].keys() if re.match(r'^clusters.*', k)
                 ]
             return HDF5Detail(
                 status=STATUS_READY,
@@ -358,10 +388,13 @@ BASE_DIR = os.getenv('BASE_DIR', 'data')
 
 def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
     """Render UI for WSI processing mode."""
+    model_label = model_labels[st.session_state.model]
+
     st.subheader('WSIをパッチ分割し特徴量を抽出する', divider=True)
-    st.write(f'分割したパッチをHDF5に保存し、{DEFAULT_MODEL_LABEL}特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
+    st.write(f'分割したパッチをHDF5に保存し、{model_label}特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
 
     do_clustering = st.checkbox('クラスタリングも実行する', value=True, disabled=st.session_state.locked)
+    rotate = st.checkbox('画像を回転させる（WSIファイルのビュアーの画面から回転された状態で処理します）', value=True, disabled=st.session_state.locked)
 
     hdf5_paths = []
     if st.button('処理を実行', disabled=st.session_state.locked, on_click=lock):
@@ -382,17 +415,17 @@ def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
                 else:
                     with st.spinner('WSIを分割しHDF5ファイルを構成しています...', show_time=True):
                         wp = WSIProcessor(wsi_path)
-                        wp.convert_to_hdf5(hdf5_tmp_path, patch_size=PATCH_SIZE, progress='streamlit')
+                        wp.convert_to_hdf5(hdf5_tmp_path, patch_size=PATCH_SIZE, rotate=rotate, progress='streamlit')
                     os.rename(hdf5_tmp_path, hdf5_path)
                     st.write('HDF5ファイルに変換完了。')
 
                 if matched_h5_entry is not None and matched_h5_entry.detail and matched_h5_entry.detail.has_features:
-                    st.write(f'すでに{DEFAULT_MODEL_LABEL}特徴量を抽出済みなので処理をスキップしました。')
+                    st.write(f'すでに{model_label}特徴量を抽出済みなので処理をスキップしました。')
                 else:
-                    with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
-                        tp = TileProcessor(device='cuda')
+                    with st.spinner(f'{model_label}特徴量を抽出中...', show_time=True):
+                        tp = TileProcessor(model_name=st.session_state.model, device='cuda')
                         tp.evaluate_hdf5_file(hdf5_path, batch_size=BATCH_SIZE, overwrite=True, progress='streamlit')
-                    st.write(f'{DEFAULT_MODEL_LABEL}特徴量の抽出完了。')
+                    st.write(f'{model_label}特徴量の抽出完了。')
                 hdf5_paths.append(hdf5_path)
                 if i < len(selected_files)-1:
                     st.divider()
@@ -408,14 +441,14 @@ def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
                     with st.spinner(f'クラスタリング中...', show_time=True):
                         cluster_proc = ClusterProcessor(
                                 [hdf5_path],
-                                model_name=DEFAULT_MODEL,
+                                model_name=st.session_state.model,
                                 cluster_name='')
                         cluster_proc.anlyze_clusters(resolution=DEFAULT_CLUSTER_RESOLUTION, progress='streamlit')
                         cluster_proc.plot_umap(fig_path=umap_path)
                     st.write(f'クラスタリング結果を{os.path.basename(umap_path)}に出力しました。')
 
                     with st.spinner('オーバービュー生成中', show_time=True):
-                        thumb_proc = PreviewClustersProcessor(hdf5_path, size=THUMBNAIL_SIZE)
+                        thumb_proc = PreviewClustersProcessor(hdf5_path, model_name=st.session_state.model, size=THUMBNAIL_SIZE)
                         img = thumb_proc.create_thumbnail(cluster_name='', progress='streamlit')
                         img.save(thumb_path)
                     st.write(f'オーバービューを{os.path.basename(thumb_path)}に出力しました。')
@@ -428,6 +461,7 @@ def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
 
 def render_mode_hdf5(selected_files: List[FileEntry]):
     """Render UI for HDF5 analysis mode."""
+    model_label = model_labels[st.session_state.model]
     st.subheader('HDF5ファイル解析オプション', divider=True)
 
     # 選択されたファイルの詳細情報を取得
@@ -488,13 +522,13 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
                     if not f.detail or not f.detail.has_features:
                         st.write(f'{f.name}の特徴量が未抽出なので、抽出を行います。')
                         tile_proc = TileProcessor(model_name=DEFAULT_MODEL, device='cuda')
-                        with st.spinner(f'{DEFAULT_MODEL_LABEL}特徴量を抽出中...', show_time=True):
+                        with st.spinner(f'{model_label}特徴量を抽出中...', show_time=True):
                             tile_proc.evaluate_hdf5_file(f.path, batch_size=BATCH_SIZE, progress='streamlit', overwrite=True)
-                        st.write(f'{DEFAULT_MODEL_LABEL}特徴量の抽出完了。')
+                        st.write(f'{model_label}特徴量の抽出完了。')
 
                 cluster_proc = ClusterProcessor(
                         [f.path for f in selected_files],
-                        model_name=DEFAULT_MODEL,
+                        model_name=st.session_state.model,
                         cluster_name=cluster_name,
                         )
                 t = 'と'.join([f.name for f in selected_files])
@@ -520,7 +554,7 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
 
                 with st.spinner('オーバービュー生成中...', show_time=True):
                     for f in selected_files:
-                        thumb_proc = PreviewClustersProcessor(f.path, size=THUMBNAIL_SIZE)
+                        thumb_proc = PreviewClustersProcessor(f.path, model_name=st.session_state.model, size=THUMBNAIL_SIZE)
                         p = P(f.path)
                         if len(selected_files) > 1:
                             thumb_path = str(p.parent / f'{cluster_name}_{p.stem}_thumb.jpg')
@@ -535,20 +569,6 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
 
             if st.button('リセットする', on_click=unlock):
                 st.rerun()
-
-def render_navigation(current_dir_abs, default_root_abs):
-    """Render navigation buttons for moving between directories."""
-    with st_horizontal():
-        if current_dir_abs == default_root_abs:
-            st.button('↑ 親フォルダへ', disabled=True)
-        else:
-            if st.button('↑ 親フォルダへ', disabled=st.session_state.locked):
-                parent_dir = os.path.dirname(current_dir_abs)
-                if os.path.commonpath([default_root_abs]) == os.path.commonpath([default_root_abs, parent_dir]):
-                    st.session_state.current_dir = parent_dir
-                    st.rerun()
-        if st.button('フォルダ更新', disabled=st.session_state.locked):
-            st.rerun()
 
 
 def recognize_file_type(selected_files: List[FileEntry]) -> FileType:
@@ -569,6 +589,9 @@ def main():
 
     if 'locked' not in st.session_state:
         set_locked_state(False)
+
+    if 'model' not in st.session_state:
+        st.session_state.model = DEFAULT_MODEL
 
     st.title('ロビえもんNEXT - WSI AI解析システム')
 
