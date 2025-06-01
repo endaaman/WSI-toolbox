@@ -40,7 +40,7 @@ def create_model(model_name):
                                  dynamic_img_size=True)
 
     if model_name == 'virchow2':
-        return timm.create_model("hf-hub:paige-ai/Virchow2",
+        return timm.create_model('hf-hub:paige-ai/Virchow2',
                                   pretrained=True,
                                   mlp_layer=SwiGLUPacked,
                                   act_layer=torch.nn.SiLU)

@@ -521,7 +521,7 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
                 for f in selected_files:
                     if not f.detail or not f.detail.has_features:
                         st.write(f'{f.name}の特徴量が未抽出なので、抽出を行います。')
-                        tile_proc = TileProcessor(model_name=DEFAULT_MODEL, device='cuda')
+                        tile_proc = TileProcessor(model_name=st.session_state.model, device='cuda')
                         with st.spinner(f'{model_label}特徴量を抽出中...', show_time=True):
                             tile_proc.evaluate_hdf5_file(f.path, batch_size=BATCH_SIZE, progress='streamlit', overwrite=True)
                         st.write(f'{model_label}特徴量の抽出完了。')
