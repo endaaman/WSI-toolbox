@@ -223,6 +223,7 @@ def get_hdf5_detail(hdf_path) -> Optional[HDF5Detail]:
                     k.replace('clusters_', '').replace('clusters', 'デフォルト')
                     for k in f[model_name].keys() if re.match(r'^clusters.*', k)
                 ]
+                cluster_names = [n for n in cluster_names if '-' not in n]
             cluster_ids_by_name = {}
             for c in cluster_names:
                 k = 'clusters' if c == 'デフォルト' else f'clusters_{c}'
@@ -535,25 +536,25 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
                 value='', placeholder='半角英数字でクラスタ名を入力してください')
         cluster_name = cluster_name.lower()
 
-    avalilable_cluster_names = []
+    available_cluster_name = []
     if len(selected_files) == 1:
-        # avalilable_cluster_names.append('デフォルト')
-        avalilable_cluster_names += list(selected_files[0].detail.cluster_ids_by_name.keys())
+        # available_cluster_name.append('デフォルト')
+        available_cluster_name += list(selected_files[0].detail.cluster_ids_by_name.keys())
     else:
         # ファイルごとのユニークなクラスタ名を取得
         cluster_name_sets = [set(f.detail.cluster_ids_by_name.keys()) for f in selected_files]
         common_cluster_name_set = set.intersection(*cluster_name_sets)
         common_cluster_name_set -= { 'デフォルト' }
-        avalilable_cluster_names = list(common_cluster_name_set)
+        available_cluster_name = list(common_cluster_name_set)
 
     subcluster_name = ''
     subcluster_filter = None
     subcluster_label = ''
-    if len(avalilable_cluster_names) > 0:
+    if len(available_cluster_name) > 0:
         subcluster_targets_map = { }
         subcluster_targets = []
         for f in selected_files:
-            for cluster_name in avalilable_cluster_names:
+            for cluster_name in available_cluster_name:
                 cluster_ids = f.detail.cluster_ids_by_name[cluster_name]
                 for i in cluster_ids:
                     v = f'{cluster_name} - {i}'
@@ -578,16 +579,19 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
                 render_reset_button()
                 return
             subcluster_name = subcluster_names[0]
-            if subcluster_name == 'デフォルト':
-                subcluster_name = ''
-            if subcluster_name:
-                cluster_name = subcluster_name
             subcluster_label = 'sub' + '-'.join([str(i) for i in subcluster_filter])
 
     if form.form_submit_button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
         set_locked_state(True)
 
-        if len(selected_files) > 1 and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
+        st.write('cluster_name')
+        st.write(cluster_name)
+        st.write('subcluster_name')
+        st.write(subcluster_name)
+        st.write('subcluster_filter')
+        st.write(subcluster_filter)
+
+        if len(selected_files) > 1 and not re.match(r'[a-z0-9]+', cluster_name):
             st.error('クラスタ名は小文字半角英数記号のみ入力してください')
             st.render_reset_button()
             return
@@ -647,8 +651,16 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
                     base += f'_{subcluster_label}'
                 thumb_path = str(p.parent / f'{base}_thumb.jpg')
 
+                if subcluster_filter:
+                    if subcluster_name == 'デフォルト':
+                        c = subcluster_label
+                    else:
+                        c = f'{cluster_name}_{subcluster_label}'
+                else:
+                    c = cluster_name
+
                 thumb = thumb_proc.create_thumbnail(
-                        cluster_name=f'{cluster_name}_{subcluster_label}' if subcluster_filter else cluster_name,
+                        cluster_name=c,
                         progress='streamlit')
                 thumb.save(thumb_path)
                 st.subheader('オーバービュー')
