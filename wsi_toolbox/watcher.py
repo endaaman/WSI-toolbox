@@ -14,7 +14,7 @@ class Status:
     PROCESSING = "PROCESSING"
     DONE = "DONE"
     ERROR = "ERROR"
-    
+
     @classmethod
     def is_processing_state(cls, status: str) -> bool:
         """状態が処理中系かどうかを判定"""
@@ -23,14 +23,14 @@ class Status:
 class Task:
     REQUEST_FILE = "_ROBIEMON.txt"
     LOG_FILE = "_ROBIEMON_LOG.txt"
-    
+
     def __init__(self, folder:Path, model_name:str, on_complete:Optional[Callable[[Path], None]] = None):
         self.folder = folder
         self.model_name = model_name
         self.on_complete = on_complete
         self.wsi_files = list(folder.glob("**/*.ndpi")) + list(folder.glob("**/*.svs"))
         self.wsi_files.sort()
-    
+
     def write_banner(self):
         """処理開始時のバナーをログに書き込み"""
         self.append_log("="*50)
@@ -40,43 +40,43 @@ class Task:
             size_mb = wsi_file.stat().st_size / (1024 * 1024)
             self.append_log(f"  {i}. {wsi_file.name} ({size_mb:.1f} MB)")
         self.append_log("="*50)
-    
+
     def run(self):
         try:
             # ログファイルをクリア
             with open(self.folder / self.LOG_FILE, "w") as f:
                 f.write("")
-            
+
             self.set_status(Status.PROCESSING)
             self.write_banner()
-            
+
             # WSIファイルごとの処理
             for i, wsi_file in enumerate(self.wsi_files):
                 try:
                     self.append_log(f"Processing [{i+1}/{len(self.wsi_files )}]: {wsi_file.name}")
-                    
+
                     hdf5_tmp_path = wsi_file.with_suffix('.h5.tmp')
                     hdf5_file = wsi_file.with_suffix(".h5")
                     # HDF5変換（既存の場合はスキップ）
                     if not hdf5_file.exists():
                         self.append_log("Converting to HDF5...")
                         wp = WSIProcessor(str(wsi_file), model_name=self.model_name)
-                        wp.convert_to_hdf5(str(hdf5_tmp_path))
+                        wp.convert_to_hdf5(str(hdf5_tmp_path), rotate=True)
                         os.rename(hdf5_tmp_path, hdf5_file)
                         self.append_log("HDF5 conversion completed.")
-                    
+
                     # ViT特徴量抽出（既存の場合はスキップ）
                     self.append_log("Extracting ViT features...")
                     tp = TileProcessor(device="cuda", model_name=self.model_name)
                     tp.evaluate_hdf5_file(str(hdf5_file))
                     self.append_log("ViT feature extraction completed.")
-                    
+
                     # クラスタリングとUMAP生成
                     self.append_log("Starting clustering ...")
                     cp = ClusterProcessor([hdf5_file], model_name=self.model_name)
                     cp.anlyze_clusters(resolution=1.0)
                     self.append_log("Clustering completed.")
-                    
+
                     base = str(wsi_file.with_suffix(""))
 
                     # UMAPプロット生成
@@ -87,7 +87,7 @@ class Task:
                         self.append_log(f"UMAP plot completed. Saved to {os.path.basename(umap_path)}")
                     else:
                         self.append_log(f"UMAP plot already exists. Skipped.")
-                    
+
                     # サムネイル生成
                     self.append_log("Starting thumbnail generation...")
                     thumb_path = Path(f"{base}_thumb.jpg")
@@ -100,28 +100,28 @@ class Task:
                         self.append_log(f"Thumbnail already exists. Skipped.")
 
                     self.append_log("="*30)
-                    
+
                 except Exception as e:
                     self.append_log(f"Error processing {wsi_file}: {str(e)}")
                     self.set_status(Status.ERROR)
                     if self.on_complete:
                         self.on_complete(self.folder)
                     return
-            
+
             self.set_status(Status.DONE)
             self.append_log("All processing completed successfully")
-            
+
         except Exception as e:
             self.append_log(f"Error: {str(e)}")
-        
+
         if self.on_complete:
             self.on_complete(self.folder)
-    
+
     def set_status(self, status: str):
         self.status = status
         with open(self.folder / self.REQUEST_FILE, "w") as f:
             f.write(f"{status}\n")
-    
+
     def append_log(self, message: str):
         with open(self.folder / self.LOG_FILE, "a") as f:
             f.write(message + "\n")
@@ -132,48 +132,48 @@ class Watcher:
         self.base_dir = Path(base_dir)
         self.running_tasks: Dict[Path, Task] = {}
         self.console = Console()
-    
+
     def run(self, interval: int = 60):
         self.console.print("\n[bold blue]ROBIEMON Watcher started[/]")
         self.console.print(f"[blue]Watching directory:[/] {self.base_dir}")
         self.console.print(f"[blue]Polling interval:[/] {interval} seconds")
         self.console.print("[yellow]Press Ctrl+C to stop[/]\n")
-        
+
         while True:
             try:
                 self.check_folders()
-                
+
                 # カウントダウン表示
                 for remaining in range(interval, 0, -1):
                     print(f"\rNext check in {remaining:2d}s", end="", flush=True)
                     time.sleep(1)
                 # カウントダウン終了後、同じ行を再利用
                 print("\rNext check in  0s", end="", flush=True)
-                
+
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Stopping watcher...[/]")
                 break
             except Exception as e:
                 self.console.print(f"[red]ERROR:[/] {str(e)}")
-    
+
     def check_folders(self):
         for folder in self.base_dir.rglob("*"):
             if not folder.is_dir():
                 continue
-                
+
             request_file = folder / Task.REQUEST_FILE
             if not request_file.exists():
                 continue
-                
+
             if folder in self.running_tasks:
                 continue
-                
+
             try:
                 with open(request_file, "r") as f:
                     status = f.read().strip()
             except:
                 continue
-            
+
             if Status.is_processing_state(status):
                 continue
 
@@ -207,9 +207,9 @@ def main():
         default=60,
         help="Polling interval in seconds (default: 60)"
     )
-    
+
     args = parser.parse_args()
-    
+
     base_dir = Path(args.base_dir)
     if not base_dir.exists():
         print(f"Error: Base directory '{args.base_dir}' does not exist")
@@ -217,7 +217,7 @@ def main():
     if not base_dir.is_dir():
         print(f"Error: '{args.base_dir}' is not a directory")
         return
-    
+
     watcher = Watcher(args.base_dir)
     watcher.run(interval=args.interval)  # asyncio.runを削除
 
