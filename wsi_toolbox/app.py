@@ -21,7 +21,7 @@ import streamlit as st
 sys.path.append(str(P(__file__).parent))
 __package__ = 'wsi_toolbox'
 
-from .common import DEFAULT_MODEL, model_labels, model_names, model_names_by_label
+from .common import DEFAULT_MODEL, MODEL_LABELS, MODEL_NAMES_BY_LABEL
 from .utils.progress import tqdm_or_st
 from .utils.st import st_horizontal
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
@@ -136,6 +136,10 @@ STATUS_BLOCKED = 1
 STATUS_UNSUPPORTED = 2
 
 
+def render_reset_button():
+    if st.button('リセットする', on_click=unlock):
+        st.rerun()
+
 def render_navigation(current_dir_abs, default_root_abs):
     """Render navigation buttons for moving between directories."""
     with st_horizontal():
@@ -150,14 +154,14 @@ def render_navigation(current_dir_abs, default_root_abs):
         if st.button('フォルダ更新', disabled=st.session_state.locked):
             st.rerun()
 
-        model_label = model_labels[st.session_state.model]
+        model_label = MODEL_LABELS[st.session_state.model]
         new_model_label = st.selectbox(
             '使用モデル',
-            list(model_labels.values()),
-            index=list(model_labels.values()).index(model_label),
+            list(MODEL_LABELS.values()),
+            index=list(MODEL_LABELS.values()).index(model_label),
             disabled=st.session_state.locked
         )
-        new_model = model_names_by_label[new_model_label]
+        new_model = MODEL_NAMES_BY_LABEL[new_model_label]
 
         # モデルが変更された場合、即座にリロード
         if new_model != st.session_state.model:
@@ -174,6 +178,7 @@ class HDF5Detail(BaseModel):
     cols: int
     rows: int
     desc: Optional[str] = None
+    cluster_ids_by_name: Dict[str, List[int]]
 
 class FileEntry(BaseModel):
     name: str
@@ -208,6 +213,7 @@ def get_hdf5_detail(hdf_path) -> Optional[HDF5Detail]:
                     mpp=0,
                     cols=0,
                     rows=0,
+                    cluster_ids_by_name={},
                 )
             patch_count = f['metadata/patch_count'][()]
             has_features = (f'{model_name}/features' in f) and (len(f[f'{model_name}/features']) == patch_count)
@@ -217,6 +223,13 @@ def get_hdf5_detail(hdf_path) -> Optional[HDF5Detail]:
                     k.replace('clusters_', '').replace('clusters', 'デフォルト')
                     for k in f[model_name].keys() if re.match(r'^clusters.*', k)
                 ]
+            cluster_ids_by_name = {}
+            for c in cluster_names:
+                k = 'clusters' if c == 'デフォルト' else f'clusters_{c}'
+                k = f'{st.session_state.model}/{k}'
+                if k in f :
+                    ids = np.unique(f[k][()]).tolist()
+                    cluster_ids_by_name[c] = ids
             return HDF5Detail(
                 status=STATUS_READY,
                 has_features=has_features,
@@ -225,6 +238,7 @@ def get_hdf5_detail(hdf_path) -> Optional[HDF5Detail]:
                 mpp=f['metadata/mpp'][()],
                 cols=f['metadata/cols'][()],
                 rows=f['metadata/rows'][()],
+                cluster_ids_by_name=cluster_ids_by_name,
             )
     except BlockingIOError:
         return HDF5Detail(
@@ -388,7 +402,7 @@ BASE_DIR = os.getenv('BASE_DIR', 'data')
 
 def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
     """Render UI for WSI processing mode."""
-    model_label = model_labels[st.session_state.model]
+    model_label = MODEL_LABELS[st.session_state.model]
 
     st.subheader('WSIをパッチ分割し特徴量を抽出する', divider=True)
     st.write(f'分割したパッチをHDF5に保存し、{model_label}特徴量抽出を実行します。それぞれ5分、20分程度かかります。')
@@ -456,12 +470,11 @@ def render_mode_wsi(files: List[FileEntry], selected_files: List[FileEntry]):
                     st.divider()
 
         st.write('すべての処理が完了しました。')
-        if st.button('リセットする', on_click=unlock):
-            st.rerun()
+        render_reset_button()
 
 def render_mode_hdf5(selected_files: List[FileEntry]):
     """Render UI for HDF5 analysis mode."""
-    model_label = model_labels[st.session_state.model]
+    model_label = MODEL_LABELS[st.session_state.model]
     st.subheader('HDF5ファイル解析オプション', divider=True)
 
     # 選択されたファイルの詳細情報を取得
@@ -474,101 +487,176 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
 
     if len(set(df_details['status'])) > 1:
         st.error('サポートされていないHDF5ファイルが含まれています。')
-    elif np.all(df_details['status'] == STATUS_UNSUPPORTED):
+        return
+    if np.all(df_details['status'] == STATUS_UNSUPPORTED):
         st.error('サポートされていないHDF5ファイルが選択されました。')
-    elif np.all(df_details['status'] == STATUS_BLOCKED):
+        return
+    if np.all(df_details['status'] == STATUS_BLOCKED):
         st.error('他システムで使用されています。')
-    elif np.all(df_details['status'] == STATUS_READY):
-        df_details['has_features'] = df_details['has_features'].map({True: '抽出済み', False: '未抽出'})
-        st.dataframe(
-            df_details,
-            column_config={
-                'name': 'ファイル名',
-                'has_features': '特徴量抽出状況',
-                'cluster_names': 'クラスタリング処理状況',
-                'patch_count': 'パッチ数',
-                'mpp': 'micro/pixel',
-                'status': None,
-            },
-            hide_index=True,
-            use_container_width=False,
+        return
+    if not np.all(df_details['status'] == STATUS_READY):
+        st.error('不明な状態です。')
+        return
+
+    df_details['has_features'] = df_details['has_features'].map({True: '抽出済み', False: '未抽出'})
+    st.dataframe(
+        df_details,
+        column_config={
+            'name': 'ファイル名',
+            'has_features': '特徴量抽出状況',
+            'cluster_names': 'クラスタリング処理状況',
+            'patch_count': 'パッチ数',
+            'mpp': 'micro/pixel',
+            'status': None,
+            'desc': None,
+            'cluster_ids_by_name': None,
+        },
+        hide_index=True,
+        use_container_width=False,
+    )
+
+    form = st.form(key='form_hdf5')
+    resolution = form.slider('クラスタリング解像度（Leiden resolution）',
+                             min_value=MIN_CLUSTER_RESOLUTION,
+                             max_value=MAX_CLUSTER_RESOLUTION,
+                             value=DEFAULT_CLUSTER_RESOLUTION,
+                             step=CLUSTER_RESOLUTION_STEP,
+                             disabled=st.session_state.locked)
+    overwrite = form.checkbox('計算済みクラスタ結果を再利用しない（再計算を行う）', value=False, disabled=st.session_state.locked)
+    use_umap_embs = form.checkbox('エッジの重み算出にUMAPの埋め込みを使用する', value=False, disabled=st.session_state.locked)
+
+    cluster_name = ''
+    if len(selected_files) > 1:
+        cluster_name = form.text_input(
+                'クラスタ名（'
+                '複数スライドで同時処理時は、単一時と区別のための名称が必要です。'
+                'サブクラスタークラスター解析時は空欄にしてください）',
+                disabled=st.session_state.locked,
+                value='', placeholder='半角英数字でクラスタ名を入力してください')
+        cluster_name = cluster_name.lower()
+
+    avalilable_cluster_names = []
+    if len(selected_files) == 1:
+        # avalilable_cluster_names.append('デフォルト')
+        avalilable_cluster_names += list(selected_files[0].detail.cluster_ids_by_name.keys())
+    else:
+        # ファイルごとのユニークなクラスタ名を取得
+        cluster_name_sets = [set(f.detail.cluster_ids_by_name.keys()) for f in selected_files]
+        common_cluster_name_set = set.intersection(*cluster_name_sets)
+        common_cluster_name_set -= { 'デフォルト' }
+        avalilable_cluster_names = list(common_cluster_name_set)
+
+    subcluster_name = ''
+    subcluster_filter = None
+    subcluster_label = ''
+    if len(avalilable_cluster_names) > 0:
+        subcluster_targets_map = { }
+        subcluster_targets = []
+        for f in selected_files:
+            for cluster_name in avalilable_cluster_names:
+                cluster_ids = f.detail.cluster_ids_by_name[cluster_name]
+                for i in cluster_ids:
+                    v = f'{cluster_name} - {i}'
+                    if v not in subcluster_targets:
+                        subcluster_targets.append(v)
+                        subcluster_targets_map[v] = [cluster_name, i]
+
+        subcluster_targets_result = form.multiselect(
+            'サブクラスター対象',
+            subcluster_targets,
+            disabled=st.session_state.locked
         )
+        if len(subcluster_targets_result) > 0:
+            subcluster_names = []
+            subcluster_filter = []
+            for r in subcluster_targets_result:
+                subcluster_name, id = subcluster_targets_map[r]
+                subcluster_names.append(subcluster_name)
+                subcluster_filter.append(id)
+            if len(set(subcluster_names)) > 1:
+                st.error('サブクラスター対象は同一クラスタリング対象から選んでください')
+                render_reset_button()
+                return
+            subcluster_name = subcluster_names[0]
+            if subcluster_name == 'デフォルト':
+                subcluster_name = ''
+            if subcluster_name:
+                cluster_name = subcluster_name
+            subcluster_label = 'sub' + '-'.join([str(i) for i in subcluster_filter])
 
-        form = st.form(key='form_hdf5')
+    if form.form_submit_button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
+        set_locked_state(True)
 
-        cluster_name = ''
-        if len(selected_files) > 1:
-            cluster_name = form.text_input(
-                    'クラスタ名（複数スライドで同時クラスタリングを行う場合は、単一条件と区別するための名称が必要になります）',
-                    disabled=st.session_state.locked,
-                    value='', placeholder='半角英数字でクラスタ名を入力してください')
-            cluster_name = cluster_name.lower()
+        if len(selected_files) > 1 and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
+            st.error('クラスタ名は小文字半角英数記号のみ入力してください')
+            st.render_reset_button()
+            return
 
-        resolution = form.slider('クラスタリング解像度（Leiden resolution）',
-                                 min_value=MIN_CLUSTER_RESOLUTION,
-                                 max_value=MAX_CLUSTER_RESOLUTION,
-                                 value=DEFAULT_CLUSTER_RESOLUTION,
-                                 step=CLUSTER_RESOLUTION_STEP,
-                                 disabled=st.session_state.locked)
-        overwrite = form.checkbox('計算済みクラスタ結果を再利用しない（再計算を行う）', value=False, disabled=st.session_state.locked)
-        use_umap_embs = form.checkbox('エッジの重み算出にUMAPの埋め込みを使用する', value=False, disabled=st.session_state.locked)
+        for f in selected_files:
+            if not f.detail or not f.detail.has_features:
+                st.write(f'{f.name}の特徴量が未抽出なので、抽出を行います。')
+                tile_proc = TileProcessor(model_name=st.session_state.model, device='cuda')
+                with st.spinner(f'{model_label}特徴量を抽出中...', show_time=True):
+                    tile_proc.evaluate_hdf5_file(f.path, batch_size=BATCH_SIZE, progress='streamlit', overwrite=True)
+                st.write(f'{model_label}特徴量の抽出完了。')
 
-        if form.form_submit_button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
-            set_locked_state(True)
-            if len(selected_files) > 1 and not re.match(r'[a-zA-Z0-9_-]+', cluster_name):
-                st.error('クラスタ名は小文字半角英数記号のみ入力してください')
+        cluster_proc = ClusterProcessor(
+                [f.path for f in selected_files],
+                model_name=st.session_state.model,
+                cluster_name=cluster_name,
+                cluster_filter=subcluster_filter,
+                )
+
+        t = 'と'.join([f.name for f in selected_files])
+        with st.spinner(f'{t}をクラスタリング中...', show_time=True):
+            p = P(selected_files[0].path)
+            if len(selected_files) > 1:
+                base = cluster_name
             else:
-                for f in selected_files:
-                    if not f.detail or not f.detail.has_features:
-                        st.write(f'{f.name}の特徴量が未抽出なので、抽出を行います。')
-                        tile_proc = TileProcessor(model_name=st.session_state.model, device='cuda')
-                        with st.spinner(f'{model_label}特徴量を抽出中...', show_time=True):
-                            tile_proc.evaluate_hdf5_file(f.path, batch_size=BATCH_SIZE, progress='streamlit', overwrite=True)
-                        st.write(f'{model_label}特徴量の抽出完了。')
+                base = p.stem
+            if subcluster_filter:
+                base += f'_{subcluster_label}'
+            umap_path = str(p.parent / f'{base}_umap.png')
 
-                cluster_proc = ClusterProcessor(
-                        [f.path for f in selected_files],
+            cluster_proc.anlyze_clusters(resolution=resolution,
+                                         overwrite=overwrite,
+                                         use_umap_embs=use_umap_embs,
+                                         progress='streamlit')
+            cluster_proc.plot_umap(fig_path=umap_path)
+
+        st.subheader('UMAP投射 + クラスタリング')
+        umap_filename = os.path.basename(umap_path)
+        st.image(Image.open(umap_path), caption=umap_filename)
+        st.write(f'{umap_filename}に出力しました。')
+
+        st.divider()
+
+        with st.spinner('オーバービュー生成中...', show_time=True):
+            for f in selected_files:
+                thumb_proc = PreviewClustersProcessor(
+                        f.path,
                         model_name=st.session_state.model,
-                        cluster_name=cluster_name,
+                        size=THUMBNAIL_SIZE
                         )
-                t = 'と'.join([f.name for f in selected_files])
-                with st.spinner(f'{t}をクラスタリング中...', show_time=True):
-                    p = P(selected_files[0].path)
-                    if len(selected_files) > 1:
-                        umap_path = str(p.parent / f'{cluster_name}_umap.png')
-                    else:
-                        umap_path = str(p.parent / f'{p.stem}_umap.png')
+                p = P(f.path)
+                if len(selected_files) > 1:
+                    base = f'{cluster_name}_{p.stem}'
+                else:
+                    base = p.stem
+                if subcluster_filter:
+                    base += f'_{subcluster_label}'
+                thumb_path = str(p.parent / f'{base}_thumb.jpg')
 
-                    cluster_proc.anlyze_clusters(resolution=resolution,
-                                                 overwrite=overwrite,
-                                                 use_umap_embs=use_umap_embs,
-                                                 progress='streamlit')
-                    cluster_proc.plot_umap(fig_path=umap_path)
+                thumb = thumb_proc.create_thumbnail(
+                        cluster_name=f'{cluster_name}_{subcluster_label}' if subcluster_filter else cluster_name,
+                        progress='streamlit')
+                thumb.save(thumb_path)
+                st.subheader('オーバービュー')
+                thumb_filename = os.path.basename(thumb_path)
+                st.image(thumb, caption=thumb_filename)
+                st.write(f'{thumb_filename}に出力しました。')
 
-                st.subheader('UMAP投射 + クラスタリング')
-                umap_filebname = os.path.basename(umap_path)
-                st.image(Image.open(umap_path), caption=umap_filebname)
-                st.write(f'{umap_filebname}に出力しました。')
-
-                st.divider()
-
-                with st.spinner('オーバービュー生成中...', show_time=True):
-                    for f in selected_files:
-                        thumb_proc = PreviewClustersProcessor(f.path, model_name=st.session_state.model, size=THUMBNAIL_SIZE)
-                        p = P(f.path)
-                        if len(selected_files) > 1:
-                            thumb_path = str(p.parent / f'{cluster_name}_{p.stem}_thumb.jpg')
-                        else:
-                            thumb_path = str(p.parent / f'{p.stem}_thumb.jpg')
-                        thumb = thumb_proc.create_thumbnail(cluster_name=cluster_name, progress='streamlit')
-                        thumb.save(thumb_path)
-                        st.subheader('オーバービュー')
-                        thumb_filename = os.path.basename(thumb_path)
-                        st.image(thumb, caption=thumb_filename)
-                        st.write(f'{thumb_filename}に出力しました。')
-
-            if st.button('リセットする', on_click=unlock):
-                st.rerun()
+        render_reset_button()
 
 
 def recognize_file_type(selected_files: List[FileEntry]) -> FileType:

@@ -485,7 +485,7 @@ class ClusterProcessor:
 
         target_path = self.clusters_path
         if self.sub_clustering:
-            suffix = '_sub-' + '-'.join([str(i) for i in self.cluster_filter])
+            suffix = '_sub' + '-'.join([str(i) for i in self.cluster_filter])
             target_path = target_path + suffix
 
         print('writing into ', target_path)

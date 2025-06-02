@@ -6,13 +6,13 @@ from timm.layers import SwiGLUPacked
 
 DEFAULT_BACKEND = 'tqdm'
 
-model_labels = {
+MODEL_LABELS = {
     'uni':  'UNI',
     'gigapath':  'Prov-Gigapath',
     'virchow2':  'Virchow2',
 }
-model_names_by_label = {v: k for k, v in model_labels.items()}
-model_names = list(model_labels.keys())
+MODEL_NAMES_BY_LABEL = {v: k for k, v in MODEL_LABELS.items()}
+MODEL_NAMES = list(MODEL_LABELS.keys())
 
 DEFAULT_MODEL = 'uni'
 EMBEDDING_SIZE = 1024

@@ -7,7 +7,7 @@ from typing import Dict, Set, Callable, Optional
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from .common import DEFAULT_MODEL
+from .common import DEFAULT_MODEL, MODEL_LABELS
 from .processor import WSIProcessor, TileProcessor, ClusterProcessor, PreviewClustersProcessor
 
 class Status:
@@ -33,10 +33,10 @@ class Task:
         should_rotate = len(parts) > 1 and parts[1].lower() == 'rotate'
         return model_name, should_rotate
 
-    def __init__(self, folder:Path, model_name:str, should_rotate:bool = True, on_complete:Optional[Callable[[Path], None]] = None):
+    def __init__(self, folder:Path, options_line:str, on_complete:Optional[Callable[[Path], None]] = None):
         self.folder = folder
-        self.model_name = model_name
-        self.should_rotate = should_rotate
+        self.options_line = options_line
+        self.model_name, self.should_rotate = self.parse_request_line(options_line)
         self.on_complete = on_complete
         self.wsi_files = list(folder.glob("**/*.ndpi")) + list(folder.glob("**/*.svs"))
         self.wsi_files.sort()
@@ -45,6 +45,10 @@ class Task:
         """処理開始時のバナーをログに書き込み"""
         self.append_log("="*50)
         self.append_log(f"Processing folder: {self.folder}")
+        self.append_log(f"Request options: {self.options_line}")
+        self.append_log(f"Parsed options:")
+        self.append_log(f"  - Model: {self.model_name} (default: {DEFAULT_MODEL})")
+        self.append_log(f"  - Rotation: {'enabled' if self.should_rotate else 'disabled'}")
         self.append_log(f"Found {len(self.wsi_files)} WSI files:")
         for i, wsi_file in enumerate(self.wsi_files, 1):
             size_mb = wsi_file.stat().st_size / (1024 * 1024)
@@ -185,8 +189,7 @@ class Watcher:
                         continue
                     
                     # First line contains model/rotation specs
-                    first_line = content.split('\n')[0].strip()
-                    model_name, should_rotate = Task.parse_request_line(first_line)
+                    options_line = content.split('\n')[0].strip()
                     
                     # Original status check from the entire file
                     status = content.strip()
@@ -201,13 +204,9 @@ class Watcher:
             print()
             print()
             print(f"detected: {folder}")
-            print("Request file parsing:")
-            print(f"  - Raw first line: {first_line}")
-            print(f"  - Parsed options:")
-            print(f"    * Model: {model_name} (default: {DEFAULT_MODEL})")
-            print(f"    * Rotation: {'enabled' if should_rotate else 'disabled'}")
+            print(f"Request options: {options_line}")
             
-            task = Task(folder, model_name, should_rotate, on_complete=lambda f: self.running_tasks.pop(f, None))
+            task = Task(folder, options_line, on_complete=lambda f: self.running_tasks.pop(f, None))
             self.running_tasks[folder] = task
             task.run()  # 同期実行に変更
 
