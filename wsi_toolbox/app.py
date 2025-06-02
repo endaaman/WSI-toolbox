@@ -584,13 +584,6 @@ def render_mode_hdf5(selected_files: List[FileEntry]):
     if form.form_submit_button('クラスタリングを実行', disabled=st.session_state.locked, on_click=lock):
         set_locked_state(True)
 
-        st.write('cluster_name')
-        st.write(cluster_name)
-        st.write('subcluster_name')
-        st.write(subcluster_name)
-        st.write('subcluster_filter')
-        st.write(subcluster_filter)
-
         if len(selected_files) > 1 and not re.match(r'[a-z0-9]+', cluster_name):
             st.error('クラスタ名は小文字半角英数記号のみ入力してください')
             st.render_reset_button()
