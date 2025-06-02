@@ -24,9 +24,19 @@ class Task:
     REQUEST_FILE = "_ROBIEMON.txt"
     LOG_FILE = "_ROBIEMON_LOG.txt"
 
-    def __init__(self, folder:Path, model_name:str, on_complete:Optional[Callable[[Path], None]] = None):
+    @staticmethod
+    def parse_request_line(line: str) -> tuple[str, bool]:
+        """Parse the request line for model and rotation specifications.
+        Returns (model_name, should_rotate)"""
+        parts = [p.strip() for p in line.split(',')]
+        model_name = parts[0] if parts and parts[0] else DEFAULT_MODEL
+        should_rotate = len(parts) > 1 and parts[1].lower() == 'rotate'
+        return model_name, should_rotate
+
+    def __init__(self, folder:Path, model_name:str, should_rotate:bool = True, on_complete:Optional[Callable[[Path], None]] = None):
         self.folder = folder
         self.model_name = model_name
+        self.should_rotate = should_rotate
         self.on_complete = on_complete
         self.wsi_files = list(folder.glob("**/*.ndpi")) + list(folder.glob("**/*.svs"))
         self.wsi_files.sort()
@@ -60,8 +70,8 @@ class Task:
                     # HDF5変換（既存の場合はスキップ）
                     if not hdf5_file.exists():
                         self.append_log("Converting to HDF5...")
-                        wp = WSIProcessor(str(wsi_file), model_name=self.model_name)
-                        wp.convert_to_hdf5(str(hdf5_tmp_path), rotate=True)
+                        wp = WSIProcessor(str(wsi_file))
+                        wp.convert_to_hdf5(str(hdf5_tmp_path), rotate=self.should_rotate)
                         os.rename(hdf5_tmp_path, hdf5_file)
                         self.append_log("HDF5 conversion completed.")
 
@@ -170,7 +180,17 @@ class Watcher:
 
             try:
                 with open(request_file, "r") as f:
-                    status = f.read().strip()
+                    content = f.read()
+                    if not content.strip():
+                        continue
+                    
+                    # First line contains model/rotation specs
+                    first_line = content.split('\n')[0].strip()
+                    model_name, should_rotate = Task.parse_request_line(first_line)
+                    
+                    # Original status check from the entire file
+                    status = content.strip()
+
             except:
                 continue
 
@@ -181,13 +201,13 @@ class Watcher:
             print()
             print()
             print(f"detected: {folder}")
-            model_name = status.lower()
-            if model_name in ["uni", "gigapath", "virchow2"]:
-                print(f"Model names is specified. Using: {model_name}")
-            else:
-                model_name = DEFAULT_MODEL
-                print(f"Model names is not specified. Using: {model_name} (default)")
-            task = Task(folder, model_name, on_complete=lambda f: self.running_tasks.pop(f, None))
+            print("Request file parsing:")
+            print(f"  - Raw first line: {first_line}")
+            print(f"  - Parsed options:")
+            print(f"    * Model: {model_name} (default: {DEFAULT_MODEL})")
+            print(f"    * Rotation: {'enabled' if should_rotate else 'disabled'}")
+            
+            task = Task(folder, model_name, should_rotate, on_complete=lambda f: self.running_tasks.pop(f, None))
             self.running_tasks[folder] = task
             task.run()  # 同期実行に変更
 
