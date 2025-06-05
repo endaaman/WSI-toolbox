@@ -135,7 +135,7 @@ class CLI(BaseMLCLI):
             if a.overwrite and 'slide_feature' in f:
                 print('Overwriting slide_feature.')
                 del f['slide_feature']
-            f.create_dataset('slide_feature', data=slide_feature)
+            f.create_dataset('gigapath/slide_feature', data=slide_feature)
 
 
     class ClusterArgs(CommonArgs):
