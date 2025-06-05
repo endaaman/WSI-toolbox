@@ -103,11 +103,18 @@ class CLI(BaseMLCLI):
         overwrite: bool = Field(False, s='-O')
 
     def run_process_slide(self, a:ProcessSlideArgs):
-        with h5py.File(a.input_path, 'r') as f:
+        with h5py.File(a.input_path, 'a') as f:
             if 'gigapath/slide_feature' in f:
                 if not a.overwrite:
                     print('feature embeddings are already obtained.')
                     return
+            if 'slide_feature' in f:
+                # migrate
+                slide_feature = f['slide_feature'][:]
+                f.create_dataset('gigapath/slide_feature', data=slide_feature)
+                del f['slide_feature']
+                print('Migrated from "slide_feature" to "gigapath/slide_feature"')
+                return
             features = f['gigapath/features'][:]
             coords = f['coordinates'][:]
 
@@ -431,7 +438,6 @@ class CLI(BaseMLCLI):
 
         if a.open:
             os.system(f'xdg-open {output_path}')
-
 
 
 if __name__ == '__main__':
