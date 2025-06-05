@@ -104,7 +104,7 @@ class CLI(BaseMLCLI):
 
     def run_process_slide(self, a:ProcessSlideArgs):
         with h5py.File(a.input_path, 'r') as f:
-            if 'slide_feature' in f:
+            if 'gigapath/slide_feature' in f:
                 if not a.overwrite:
                     print('feature embeddings are already obtained.')
                     return
@@ -134,7 +134,7 @@ class CLI(BaseMLCLI):
         with h5py.File(a.input_path, 'a') as f:
             if a.overwrite and 'slide_feature' in f:
                 print('Overwriting slide_feature.')
-                del f['slide_feature']
+                del f['gigapath/slide_feature']
             f.create_dataset('gigapath/slide_feature', data=slide_feature)
 
 
