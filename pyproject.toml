@@ -43,7 +43,7 @@ dependencies = [
     "timm==0.9.16",
     "torch==2.5.1",
     "torchvision==0.20.1",
-    "umap-learn==0.5.7",
+    "umap-learn>=0.5.7",
     "zarr<3",
 ]
 
