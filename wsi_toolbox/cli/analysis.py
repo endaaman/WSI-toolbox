@@ -28,6 +28,7 @@ class AnalysisMixin:
         overwrite: bool = param(False, s="-O")
 
     def run_cluster(self, a: ClusterArgs):
+        """Cluster patch features with Leiden (supports sub-clustering)."""
         input_paths = resolve_h5_paths(a.input_paths)
         parent_filters = [a.filter_ids] if len(a.filter_ids) > 0 else []
         model = a.model if a.model else a.preset
@@ -64,6 +65,7 @@ class AnalysisMixin:
         show: bool = param(False, description="Show UMAP plot")
 
     def run_umap(self, a: UmapArgs):
+        """Compute a UMAP embedding of patch features."""
         input_paths = resolve_h5_paths(a.input_paths)
         parent_filters = [a.filter_ids] if len(a.filter_ids) > 0 else []
         model = a.model if a.model else a.preset
@@ -174,6 +176,7 @@ class AnalysisMixin:
         use_sub_clusters: bool = param(False, l="--sub", s="-S", description="Use sub-clusters for plotting")
 
     def run_pca(self, a: PcaArgs):
+        """Compute PCA of patch features."""
         input_paths = resolve_h5_paths(a.input_paths)
         parent_filters = [a.filter_ids] if len(a.filter_ids) > 0 else []
         model = a.model if a.model else a.preset
@@ -294,6 +297,7 @@ class AnalysisMixin:
         open: bool = False
 
     def run_preview(self, a: PreviewArgs):
+        """Render a cluster-colored preview overlay on the WSI thumbnail."""
         hdf5_path = resolve_h5_path(a.input_path)
         model = a.model if a.model else a.preset
 
@@ -330,6 +334,7 @@ class AnalysisMixin:
         open: bool = False
 
     def run_preview_score(self, a: PreviewScoreArgs):
+        """Render a score-colored preview overlay on the WSI thumbnail."""
         hdf5_path = resolve_h5_path(a.input_path)
         model = a.model if a.model else a.preset
 

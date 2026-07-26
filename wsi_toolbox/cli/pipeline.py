@@ -32,6 +32,7 @@ class PipelineMixin:
         )
 
     def run_cache(self, a: CacheArgs):
+        """Split a WSI into patches and store them in an HDF5 file."""
         output_path = a.output_path
 
         if not output_path:
@@ -78,6 +79,7 @@ class PipelineMixin:
         prefetch: int = param(2, l="--prefetch", description="Batches to prefetch (0 to disable)")
 
     def run_extract(self, a: ExtractArgs):
+        """Extract patch features with a foundation model preset."""
         input_path = Path(a.input_path)
         ext = input_path.suffix.lower()
         is_wsi = ext in WSI_EXTENSIONS
